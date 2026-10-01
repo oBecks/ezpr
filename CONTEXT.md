@@ -77,4 +77,4 @@ What `@ezpr review` runs: a full Review of the whole pull request that ignores t
 What `@ezpr explain` posts on the pull request conversation: a plain-language account of what the pull request changes. Typed as a reply in an Inline comment thread, `explain` instead explains that one Finding.
 
 **Dismissed finding**:
-A Finding a maintainer silenced with `@ezpr ignore` in its Inline comment thread. It is never raised again. Remembered in the Summary's marker.
+A Finding a maintainer silenced with `@ezpr ignore` in its Inline comment thread. It is never raised again, however the model words it, for as long as the line of code it sits on is unchanged (identified by file and line text, so it survives line shifts). Remembered in the Summary's marker.

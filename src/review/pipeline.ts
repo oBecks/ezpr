@@ -17,6 +17,7 @@ import type { Brain } from '../providers/types';
 import type { Publish } from '../render/publish';
 import { renderTooLarge, withConfigProblems } from '../render/notices';
 import { renderNothingToReview, renderReview } from '../render/summary';
+import { diffLineTexts } from './diffmap';
 import { withoutDismissed } from './dismissed';
 import { reviewInChunks, type ChunkedResult } from './chunks';
 import { postInlineFindings } from './inline';
@@ -166,7 +167,11 @@ async function publishReview(
   // Findings a maintainer dismissed with `@ezpr ignore` are not raised again.
   const review = {
     ...done.review,
-    findings: withoutDismissed(done.review.findings, job.previous?.dismissed ?? []),
+    findings: withoutDismissed(
+      done.review.findings,
+      job.previous?.dismissed ?? [],
+      diffLineTexts(job.all),
+    ),
   };
   const inline = job.gh.canComment
     ? await postInlineFindings(

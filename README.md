@@ -72,12 +72,12 @@ Comment on a pull request to steer EzPR. Commands start at the beginning of a li
 lines and code blocks are ignored. Only the repository's owners, members and collaborators can
 run them; anyone else is silently ignored, so strangers cannot spend your API quota.
 
-| Command         | Where                     | What it does                                                                          |
-| --------------- | ------------------------- | ------------------------------------------------------------------------------------- |
-| `@ezpr review`  | PR conversation           | Reviews the whole pull request again, even if the latest commit was already reviewed. |
-| `@ezpr explain` | PR conversation           | Posts a walkthrough: what the change does and where a reviewer should look first.     |
-| `@ezpr explain` | Reply in an inline thread | Explains that finding: why it was raised, and how to fix it.                          |
-| `@ezpr ignore`  | Reply in an inline thread | Dismisses that finding. It is not raised again on this PR, even if the line moves.    |
+| Command         | Where                     | What it does                                                                                    |
+| --------------- | ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `@ezpr review`  | PR conversation           | Reviews the whole pull request again, even if the latest commit was already reviewed.           |
+| `@ezpr explain` | PR conversation           | Posts a walkthrough: what the change does and where a reviewer should look first.               |
+| `@ezpr explain` | Reply in an inline thread | Explains that finding: why it was raised, and how to fix it.                                    |
+| `@ezpr ignore`  | Reply in an inline thread | Dismisses that finding. It is not raised again on this PR while that line of code is unchanged. |
 
 EzPR reacts with 👀 when it takes a command up. Dismissals are remembered in the Summary
 comment, so nothing in your repository changes.
