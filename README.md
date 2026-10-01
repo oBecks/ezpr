@@ -2,7 +2,7 @@
 
 A free, open-source AI pull request reviewer that runs as a GitHub Action.
 
-> Status: Phase 1 (MVP). One summary comment per PR. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: Phase 2. One summary comment per PR, with automatic fallback between model providers. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Setup
 
@@ -29,6 +29,26 @@ jobs:
 ```
 
 Without a key, EzPR posts a comment explaining how to add one.
+
+## Providers and fallback
+
+Every provider is optional and enabled only when its key exists. EzPR tries them in this
+order and moves to the next on rate limits (429), server errors, timeouts or invalid output:
+
+| Provider                 | Secret                                                 | Default model         |
+| ------------------------ | ------------------------------------------------------ | --------------------- |
+| Gemini                   | `GEMINI_API_KEY`                                       | `gemini-3.5-flash`    |
+| OpenRouter               | `OPENROUTER_API_KEY`                                   | `openrouter/free`     |
+| Groq                     | `GROQ_API_KEY`                                         | `openai/gpt-oss-120b` |
+| Anthropic                | `ANTHROPIC_API_KEY`                                    | `claude-sonnet-5-5`   |
+| OpenAI                   | `OPENAI_API_KEY`                                       | `gpt-6.1-sol`         |
+| Custom OpenAI-compatible | `EZPR_BASE_URL`, `EZPR_MODEL`, optional `EZPR_API_KEY` | yours                 |
+
+Pass each key you have through `env:` in the workflow, like `GEMINI_API_KEY` above. A key
+that is rejected (401/403) is skipped and called out in the review. The review footer shows
+which model wrote it, and which ones were skipped. Override a model with
+`EZPR_<PROVIDER>_MODEL` (for example `EZPR_GROQ_MODEL`). The custom endpoint also accepts
+`EZPR_MAX_INPUT_TOKENS`. Ollama on `localhost` only works on self-hosted runners.
 
 ## Privacy
 

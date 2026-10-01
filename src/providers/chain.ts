@@ -1,13 +1,14 @@
-import type { Review } from '../prompt/schema';
+import { classify, type FailureKind } from './errors';
 import type { Brain } from './types';
 
 export interface ChainFailure {
   brain: string;
+  kind: FailureKind;
   error: string;
 }
 
-export interface ChainSuccess {
-  review: Review;
+export interface ChainSuccess<T> {
+  result: T;
   brain: Brain;
   failures: ChainFailure[];
 }
@@ -18,17 +19,51 @@ export class ChainError extends Error {
   }
 }
 
-/** Tries each Brain in order. Phase 2 adds error classification (see ADR-0002). */
-export async function runChain(
+export interface ChainOptions {
+  /** A Retry-After longer than this sends us to the next Brain instead of waiting. */
+  maxRetryAfterMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Tries each Brain in order (ADR-0002). Each Brain gets at most one retry: a repair attempt
+ * after invalid output, or one wait after a short Retry-After. A rejected key (401/403) skips
+ * that Brain and is reported rather than retried.
+ */
+export async function runChain<T>(
   brains: Brain[],
-  run: (brain: Brain) => Promise<Review>,
-): Promise<ChainSuccess> {
+  run: (brain: Brain) => Promise<T>,
+  opts: ChainOptions = {},
+): Promise<ChainSuccess<T>> {
+  const { maxRetryAfterMs = 10_000, sleep = defaultSleep } = opts;
   const failures: ChainFailure[] = [];
+
   for (const brain of brains) {
-    try {
-      return { review: await run(brain), brain, failures };
-    } catch (err) {
-      failures.push({ brain: brain.id, error: err instanceof Error ? err.message : String(err) });
+    let retried = false;
+    for (;;) {
+      try {
+        return { result: await run(brain), brain, failures };
+      } catch (err) {
+        const c = classify(err);
+        if (!retried && c.kind === 'bad-output') {
+          retried = true;
+          continue;
+        }
+        if (
+          !retried &&
+          c.kind === 'rate-limit' &&
+          c.retryAfterMs !== undefined &&
+          c.retryAfterMs <= maxRetryAfterMs
+        ) {
+          retried = true;
+          await sleep(c.retryAfterMs);
+          continue;
+        }
+        failures.push({ brain: brain.id, kind: c.kind, error: c.message });
+        break;
+      }
     }
   }
   throw new ChainError(failures);

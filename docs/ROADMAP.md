@@ -14,7 +14,7 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 - Sticky Summary (hidden marker) with model footer; fork PRs go to the job summary.
 - Tests: filtering, budgeting, redaction, sticky-comment upsert. End to end in this repo's own PRs and private `ezpr-sandbox`.
 
-## Phase 2: Fallback chain
+## Phase 2: Fallback chain (done)
 
 - Brains for Gemini, OpenRouter, Groq, Anthropic, OpenAI, custom endpoint (`EZPR_BASE_URL`/`EZPR_MODEL`/`EZPR_API_KEY`); enabled only when credentials exist.
 - Default order: Gemini, OpenRouter, Groq, Anthropic, OpenAI, custom.
