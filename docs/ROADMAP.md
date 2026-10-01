@@ -56,3 +56,4 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 
 - Phase 6: npm package name for the CLI; command trigger design.
 - Confirm Gemini free-tier limits and the default model name with a real call (docs list only AI Studio dashboard limits).
+extra line

@@ -34,3 +34,7 @@ export function makeIgnore(patterns: string[]): (path: string) => boolean {
   });
   return (path) => res.some((r) => r.test(path));
 }
+
+export function firstGlob(patterns: string[]): string {
+  return patterns[0].trim();
+}
