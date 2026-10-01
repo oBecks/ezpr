@@ -1,0 +1,5 @@
+brains: [groq, gemini]
+strictness: strict
+ignore:
+  - docs/**
+language: he
