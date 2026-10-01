@@ -21,7 +21,7 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 - Error classification per ADR-0002; footer shows final model plus skipped Brains.
 - Model names live in config. Tests for chain and error classification.
 
-## Phase 3: Inline comments
+## Phase 3: Inline comments (done)
 
 - Line-accurate placement against the diff; map Findings to review comments.
 - Skip lines already commented on in earlier runs; severity threshold decides inline vs summary-only.

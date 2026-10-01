@@ -40,4 +40,16 @@ export const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 /** Used when the custom endpoint does not set EZPR_MAX_INPUT_TOKENS. */
 export const CUSTOM_MAX_INPUT_TOKENS = 32_000;
 
-export const SUMMARY_MARKER = '<!-- ezpr:summary -->';
+/** Prefix every sticky Summary starts with; a review also records its commit SHA and time in it. */
+export const SUMMARY_MARKER_PREFIX = '<!-- ezpr:summary';
+/** Marker for Summary comments that are not a Review (Setup and error comments): no SHA recorded. */
+export const SUMMARY_MARKER = `${SUMMARY_MARKER_PREFIX} -->`;
+/** Hidden marker on every inline comment EzPR posts. */
+export const INLINE_MARKER = '<!-- ezpr:inline -->';
+
+export const SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
+export type Severity = (typeof SEVERITIES)[number];
+/** Findings at least this severe become inline comments; the rest stay in the Summary. */
+export const INLINE_MIN_SEVERITY: Severity = 'medium';
+/** Earlier reviews kept in the collapsed history; older ones are dropped to stay under the comment size limit. */
+export const MAX_HISTORY = 10;

@@ -58,3 +58,28 @@ export function fileReader(octokit: Octokit, pr: PrInfo) {
     }
   };
 }
+
+/**
+ * Files changed between a previously reviewed commit and the PR head, for incremental
+ * reviews. Returns null when the range cannot be used (force push, too many files, error);
+ * the caller then reviews the whole PR.
+ */
+export async function listChangesSince(
+  octokit: Octokit,
+  repo: { owner: string; repo: string },
+  baseSha: string,
+  headSha: string,
+): Promise<RawFile[] | null> {
+  try {
+    const { data } = await octokit.rest.repos.compareCommitsWithBasehead({
+      ...repo,
+      basehead: `${baseSha}...${headSha}`,
+      per_page: 100,
+    });
+    const files = data.files ?? [];
+    if (data.status !== 'ahead' || files.length >= 100) return null;
+    return files.map((f) => ({ path: f.filename, status: f.status, patch: f.patch }));
+  } catch {
+    return null;
+  }
+}

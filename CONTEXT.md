@@ -30,3 +30,18 @@ The repo's own `REVIEW.md`, always included in Context when present.
 
 **Fork PR**:
 A pull request from a fork, where EzPR cannot post comments and writes the Review to the job summary instead.
+
+**Inline comment**:
+A Finding posted as a review comment on its line of the pull request diff. Only Findings at or above the Severity threshold whose line is part of the diff become inline comments; every Finding still appears in the Summary.
+
+**Severity threshold**:
+The least severe level that becomes an Inline comment. Findings below it stay Summary-only. Default: `medium`.
+
+**Already commented**:
+A line (file path and line number) that carries a live Inline comment from an earlier Review. A new Finding on such a line is not posted inline again, whatever its message.
+
+**Reviewed SHA**:
+The head commit a Review covered, recorded in the Summary's marker. The next Review covers only the changes since it (an **Incremental review**), or the whole pull request if that range cannot be computed.
+
+**Review history**:
+The Summary shows the latest Review on top; earlier Reviews are kept in a collapsed section, each labelled with its Reviewed SHA and time.

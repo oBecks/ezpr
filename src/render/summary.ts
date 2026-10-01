@@ -1,6 +1,7 @@
 import { SUMMARY_MARKER } from '../config';
 import type { Context } from '../context/collect';
-import type { Review } from '../prompt/schema';
+import { shortSha } from '../github/sticky';
+import type { Finding, Review } from '../prompt/schema';
 import type { ChainFailure } from '../providers/chain';
 import { describeFailure } from '../providers/errors';
 
@@ -11,13 +12,21 @@ export function renderReview(
   brainId: string,
   ctx: Context,
   failures: ChainFailure[] = [],
+  opts: { inline?: ReadonlySet<Finding>; since?: string } = {},
 ): string {
-  const lines = [SUMMARY_MARKER, '## EzPR review', '', review.summary, ''];
+  const lines = ['## EzPR review', ''];
+  if (opts.since) {
+    lines.push(`_Incremental review: changes since \`${shortSha(opts.since)}\`._`, '');
+  }
+  lines.push(review.summary, '');
 
   if (review.findings.length) {
     lines.push('### Findings', '');
     for (const f of review.findings) {
-      lines.push(`- ${ICON[f.severity]} **${f.severity}** \`${f.file}:${f.line}\` — ${f.message}`);
+      const tag = opts.inline?.has(f) ? ' _(inline comment)_' : '';
+      lines.push(
+        `- ${ICON[f.severity]} **${f.severity}** \`${f.file}:${f.line}\` — ${f.message}${tag}`,
+      );
     }
     lines.push('');
   }
