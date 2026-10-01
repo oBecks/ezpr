@@ -1,7 +1,7 @@
 import { getSticky, parseInlineBody, writeSticky } from '../github/comments';
 import { addDismissed } from '../github/sticky';
 import type { Octokit } from '../github/pr';
-import { findingKey } from '../review/dismissed';
+import { findingKey, hunkLineText } from '../review/dismissed';
 import type { Repo } from '../review/types';
 import type { CommandEvent } from './event';
 import { reply } from './reply';
@@ -38,7 +38,7 @@ export async function ignoreFinding(octokit: Octokit, repo: Repo, ev: CommandEve
     repo,
     ev.prNumber,
     sticky,
-    addDismissed(sticky.body, findingKey(root.path, message)),
+    addDismissed(sticky.body, findingKey(root.path, hunkLineText(root.diff_hunk))),
   );
   await reply(octokit, repo, ev, "Dismissed. I won't raise this finding again on this PR.");
 }

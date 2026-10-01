@@ -60,7 +60,7 @@ describe('renderWorkflow', () => {
     const w = renderWorkflow();
     expect(w).toContain('issue_comment:');
     expect(w).toContain('pull_request_review_comment:');
-    expect(w).toContain("format('ezpr-cmd-{0}'");
+    expect(w).toContain("format('ezpr-cmd-{0}', github.event.comment.id)");
     expect(w).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
   });
 

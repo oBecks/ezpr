@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffLineMap, parseDiffLines } from '../src/review/diffmap';
+import { diffLineMap, diffLineTexts, parseDiffLines } from '../src/review/diffmap';
 
 const patch = [
   '@@ -1,4 +1,5 @@',
@@ -44,5 +44,20 @@ describe('diffLineMap', () => {
   it('keys by path and skips files without a patch', () => {
     const map = diffLineMap([{ path: 'a.ts', patch: '@@ -1 +1 @@\n+x' }, { path: 'bin.png' }]);
     expect([...map.keys()]).toEqual(['a.ts']);
+  });
+});
+
+describe('diffLineTexts', () => {
+  it('maps each commentable line to its text', () => {
+    const patch = '@@ -1,2 +1,3 @@\n keep\n+added\n keep2';
+    const texts = diffLineTexts([{ path: 'a.ts', patch }, { path: 'bin.png' }]);
+    expect(texts.get('a.ts')).toEqual(
+      new Map([
+        [1, 'keep'],
+        [2, 'added'],
+        [3, 'keep2'],
+      ]),
+    );
+    expect(texts.has('bin.png')).toBe(false);
   });
 });

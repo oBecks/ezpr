@@ -90976,17 +90976,72 @@ function buildPrompt(meta3, ctx) {
   ].join("\n");
 }
 
+// src/review/diffmap.ts
+var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+function parseDiffTexts(patch) {
+  const texts = /* @__PURE__ */ new Map();
+  let oldLeft = 0;
+  let newLeft = 0;
+  let newLine = 0;
+  for (const line of patch.split("\n")) {
+    const header = HUNK.exec(line);
+    if (header) {
+      oldLeft = Number(header[2] ?? 1);
+      newLeft = Number(header[4] ?? 1);
+      newLine = Number(header[3]);
+      continue;
+    }
+    if (oldLeft <= 0 && newLeft <= 0) continue;
+    const kind = line[0];
+    if (kind === "+") {
+      texts.set(newLine++, line.slice(1));
+      newLeft--;
+    } else if (kind === "-") {
+      oldLeft--;
+    } else if (kind === " " || line === "") {
+      texts.set(newLine++, line.slice(1));
+      newLeft--;
+      oldLeft--;
+    }
+  }
+  return texts;
+}
+function parseDiffLines(patch) {
+  return new Set(parseDiffTexts(patch).keys());
+}
+function diffLineTexts(files) {
+  const map2 = /* @__PURE__ */ new Map();
+  for (const f of files) {
+    if (f.patch) map2.set(f.path, parseDiffTexts(f.patch));
+  }
+  return map2;
+}
+function diffLineMap(files) {
+  const map2 = /* @__PURE__ */ new Map();
+  for (const f of files) {
+    if (f.patch) map2.set(f.path, parseDiffLines(f.patch));
+  }
+  return map2;
+}
+
 // src/review/dismissed.ts
 var import_node_crypto = require("node:crypto");
-function findingKey(path, message) {
-  const text = message.toLowerCase().replace(/\s+/g, " ").trim();
+function findingKey(path, lineText) {
+  const text = lineText.replace(/\s+/g, " ").trim();
   return (0, import_node_crypto.createHash)("sha1").update(`${path}
 ${text}`).digest("hex").slice(0, 12);
 }
-function withoutDismissed(findings, dismissed) {
+function hunkLineText(diffHunk) {
+  const last = diffHunk.trimEnd().split("\n").at(-1) ?? "";
+  return last.slice(1);
+}
+function withoutDismissed(findings, dismissed, lineTexts) {
   if (dismissed.length === 0) return findings;
   const gone = new Set(dismissed);
-  return findings.filter((f) => !gone.has(findingKey(f.file, f.message)));
+  return findings.filter((f) => {
+    const text = lineTexts.get(f.file)?.get(f.line);
+    return text === void 0 || !gone.has(findingKey(f.file, text));
+  });
 }
 
 // src/review/chunks.ts
@@ -91053,44 +91108,6 @@ async function reviewInChunks(input2) {
   };
 }
 
-// src/review/diffmap.ts
-var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
-function parseDiffLines(patch) {
-  const valid = /* @__PURE__ */ new Set();
-  let oldLeft = 0;
-  let newLeft = 0;
-  let newLine = 0;
-  for (const line of patch.split("\n")) {
-    const header = HUNK.exec(line);
-    if (header) {
-      oldLeft = Number(header[2] ?? 1);
-      newLeft = Number(header[4] ?? 1);
-      newLine = Number(header[3]);
-      continue;
-    }
-    if (oldLeft <= 0 && newLeft <= 0) continue;
-    const kind = line[0];
-    if (kind === "+") {
-      valid.add(newLine++);
-      newLeft--;
-    } else if (kind === "-") {
-      oldLeft--;
-    } else if (kind === " " || line === "") {
-      valid.add(newLine++);
-      newLeft--;
-      oldLeft--;
-    }
-  }
-  return valid;
-}
-function diffLineMap(files) {
-  const map2 = /* @__PURE__ */ new Map();
-  for (const f of files) {
-    if (f.patch) map2.set(f.path, parseDiffLines(f.patch));
-  }
-  return map2;
-}
-
 // src/review/inline.ts
 async function postInlineFindings(gh, allFiles, findings, minSeverity) {
   const { octokit, repo, pr } = gh;
@@ -91110,6 +91127,13 @@ async function postInlineFindings(gh, allFiles, findings, minSeverity) {
 }
 
 // src/review/pipeline.ts
+async function withFreshDismissed(job) {
+  const { octokit, repo, pr } = job.gh;
+  if (!job.previous) return void 0;
+  const latest = await getSticky(octokit, repo, pr.number);
+  const fresh = latest?.body ? parseSticky(latest.body).dismissed : [];
+  return { ...job.previous, dismissed: [.../* @__PURE__ */ new Set([...job.previous.dismissed, ...fresh])] };
+}
 function cached2(read2) {
   const cache = /* @__PURE__ */ new Map();
   return (path) => {
@@ -91194,7 +91218,11 @@ async function publishReview(job, done, noCheckout) {
   const { octokit, repo, pr } = job.gh;
   const review = {
     ...done.review,
-    findings: withoutDismissed(done.review.findings, job.previous?.dismissed ?? [])
+    findings: withoutDismissed(
+      done.review.findings,
+      job.previous?.dismissed ?? [],
+      diffLineTexts(job.all)
+    )
   };
   const inline = job.gh.canComment ? await postInlineFindings(
     job.gh,
@@ -91213,7 +91241,12 @@ async function publishReview(job, done, noCheckout) {
     configProblems: job.settings.problems
   });
   if (!job.gh.canComment) return job.publish(content);
-  const body = composeSticky(job.previous, content, pr.headSha, (/* @__PURE__ */ new Date()).toISOString());
+  const body = composeSticky(
+    await withFreshDismissed(job),
+    content,
+    pr.headSha,
+    (/* @__PURE__ */ new Date()).toISOString()
+  );
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
 async function publishNothing(job, prep) {
@@ -91228,7 +91261,12 @@ async function publishNothing(job, prep) {
 async function publishStandalone(job, content) {
   if (!job.gh.canComment) return job.publish(content);
   const { octokit, repo, pr } = job.gh;
-  const body = composeSticky(job.previous, content, pr.headSha, (/* @__PURE__ */ new Date()).toISOString());
+  const body = composeSticky(
+    await withFreshDismissed(job),
+    content,
+    pr.headSha,
+    (/* @__PURE__ */ new Date()).toISOString()
+  );
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
 async function reviewPr(job) {
@@ -91523,7 +91561,7 @@ async function ignoreFinding(octokit, repo, ev) {
     repo,
     ev.prNumber,
     sticky,
-    addDismissed(sticky.body, findingKey(root.path, message))
+    addDismissed(sticky.body, findingKey(root.path, hunkLineText(root.diff_hunk)))
   );
   await reply(octokit, repo, ev, "Dismissed. I won't raise this finding again on this PR.");
 }

@@ -8,7 +8,7 @@ import { handleCommand, USAGE } from '../src/commands/run';
 import { inlineBody } from '../src/github/comments';
 import { buildMarker, parseSticky } from '../src/github/sticky';
 import type { Octokit } from '../src/github/pr';
-import { findingKey, withoutDismissed } from '../src/review/dismissed';
+import { findingKey, hunkLineText, withoutDismissed } from '../src/review/dismissed';
 
 const repo = { owner: 'o', repo: 'r' };
 const SHA = 'a'.repeat(40);
@@ -126,10 +126,17 @@ describe('commandEventFrom', () => {
 });
 
 describe('findingKey', () => {
-  it('ignores case and spacing, but not the file or the wording', () => {
-    expect(findingKey('a.ts', 'Null  deref\nhere')).toBe(findingKey('a.ts', 'null deref here'));
-    expect(findingKey('a.ts', 'null deref')).not.toBe(findingKey('b.ts', 'null deref'));
-    expect(findingKey('a.ts', 'null deref')).not.toBe(findingKey('a.ts', 'off by one'));
+  it('ignores spacing, but not the file or the code', () => {
+    expect(findingKey('a.ts', '  total  += x;')).toBe(findingKey('a.ts', 'total += x;  '));
+    expect(findingKey('a.ts', 'total += x;')).not.toBe(findingKey('b.ts', 'total += x;'));
+    expect(findingKey('a.ts', 'total += x;')).not.toBe(findingKey('a.ts', 'total -= x;'));
+  });
+});
+
+describe('hunkLineText', () => {
+  it('is the last line of the hunk without its +/space marker', () => {
+    expect(hunkLineText('@@ -1,2 +1,3 @@\n a\n+  b();\n')).toBe('  b();');
+    expect(hunkLineText('@@ -1 +1 @@\n+only')).toBe('only');
   });
 });
 
@@ -161,7 +168,12 @@ function fakeOctokit(opts: { rootBody?: string; stickyBody?: string }) {
       },
       pulls: {
         getReviewComment: vi.fn(async () => ({
-          data: { id: 99, path: 'src/a.ts', body: opts.rootBody ?? '' },
+          data: {
+            id: 99,
+            path: 'src/a.ts',
+            body: opts.rootBody ?? '',
+            diff_hunk: '@@ -1 +1,3 @@\n context\n+  total += values[i];',
+          },
         })),
         createReplyForReviewComment: vi.fn(
           async (a: { body: string }) => void calls.replies.push(a.body),
@@ -196,14 +208,14 @@ describe('ignoreFinding', () => {
     await ignoreFinding(octokit, repo, threadEvent());
 
     const state = parseSticky(calls.updated[0] ?? '');
-    expect(state.dismissed).toEqual([findingKey('src/a.ts', 'Null deref.')]);
+    expect(state.dismissed).toEqual([findingKey('src/a.ts', 'total += values[i];')]);
     expect(state.sha).toBe(SHA);
     expect(state.latest).toBe('## EzPR review');
     expect(calls.replies[0]).toMatch(/Dismissed/);
   });
 
   it('keeps earlier dismissals and does not repeat a key', async () => {
-    const key = findingKey('src/a.ts', 'Null deref.');
+    const key = findingKey('src/a.ts', 'total += values[i];');
     const stickyBody = `${buildMarker(SHA, AT, ['abcdef012345', key])}\nbody`;
     const { octokit, calls } = fakeOctokit({ rootBody: inlineBody(finding), stickyBody });
     await ignoreFinding(octokit, repo, threadEvent());
@@ -258,16 +270,31 @@ describe('handleCommand', () => {
 });
 
 describe('withoutDismissed', () => {
-  const a = { file: 'a.ts', line: 1, severity: 'high' as const, message: 'Null deref.' };
+  const a = { file: 'a.ts', line: 3, severity: 'high' as const, message: 'Null deref.' };
   const b = { file: 'a.ts', line: 9, severity: 'low' as const, message: 'Other.' };
+  const texts = new Map([
+    [
+      'a.ts',
+      new Map([
+        [3, '  total += values[i];'],
+        [9, 'return x;'],
+      ]),
+    ],
+  ]);
+  const key = findingKey('a.ts', 'total += values[i];');
 
-  it('drops dismissed findings wherever they moved to', () => {
-    const key = findingKey('a.ts', 'null deref.');
-    expect(withoutDismissed([{ ...a, line: 40 }, b], [key])).toEqual([b]);
+  it('drops a dismissed finding however the model words it', () => {
+    const reworded = { ...a, message: 'Something else entirely.' };
+    expect(withoutDismissed([reworded, b], [key], texts)).toEqual([b]);
+  });
+
+  it('keeps findings on other lines, and findings off the diff', () => {
+    const off = { ...a, line: 500 };
+    expect(withoutDismissed([b, off], [key], texts)).toEqual([b, off]);
   });
 
   it('keeps everything when nothing is dismissed', () => {
     const list = [a, b];
-    expect(withoutDismissed(list, [])).toBe(list);
+    expect(withoutDismissed(list, [], texts)).toBe(list);
   });
 });
