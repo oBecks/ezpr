@@ -12,7 +12,11 @@ export interface MenuProvider {
 }
 
 const MENU: Record<string, { label: string; url: string; free: boolean }> = {
-  gemini: { label: 'Gemini (free key, recommended)', url: 'https://aistudio.google.com/apikey', free: true },
+  gemini: {
+    label: 'Gemini (free key, recommended)',
+    url: 'https://aistudio.google.com/apikey',
+    free: true,
+  },
   openrouter: { label: 'OpenRouter (free models)', url: 'https://openrouter.ai/keys', free: true },
   groq: { label: 'Groq (free tier)', url: 'https://console.groq.com/keys', free: true },
   anthropic: {
@@ -36,5 +40,5 @@ export const FREE_TIER_WARNING = [
   'Free API tiers can treat your data differently from paid ones: some providers may use',
   'submitted prompts to improve their models. EzPR sends the diff and the changed files of',
   'each pull request to the provider you pick (secret-like files are skipped, common secret',
-  'formats are redacted). For a private repository, check the provider\'s terms first.',
+  "formats are redacted). For a private repository, check the provider's terms first.",
 ].join('\n');

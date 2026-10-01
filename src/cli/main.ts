@@ -88,7 +88,9 @@ function systemIo(): InitIo {
           ? ['cmd', ['/c', 'start', '', url]]
           : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]];
       try {
-        spawn(cmd, args, { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
+        spawn(cmd, args, { stdio: 'ignore', detached: true })
+          .on('error', () => {})
+          .unref();
       } catch {
         // The URL is printed anyway.
       }

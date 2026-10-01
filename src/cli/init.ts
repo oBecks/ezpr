@@ -28,10 +28,13 @@ export interface InitOptions {
 export function simpleDiff(a: string, b: string): string {
   const x = a.split('\n');
   const y = b.split('\n');
-  const lcs: number[][] = Array.from({ length: x.length + 1 }, () => new Array<number>(y.length + 1).fill(0));
+  const lcs: number[][] = Array.from({ length: x.length + 1 }, () =>
+    new Array<number>(y.length + 1).fill(0),
+  );
   for (let i = x.length - 1; i >= 0; i--) {
     for (let j = y.length - 1; j >= 0; j--) {
-      lcs[i]![j] = x[i] === y[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+      lcs[i]![j] =
+        x[i] === y[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
     }
   }
   const out: string[] = [];
@@ -105,7 +108,9 @@ export async function runInit(opts: InitOptions, io: InitIo): Promise<number> {
   if (!opts.noOpen) io.openUrl(provider.url);
 
   const haveGh = io.ghAvailable();
-  const key = haveGh ? (await io.askSecret(`Paste the key (input is hidden, Enter to skip): `)).trim() : '';
+  const key = haveGh
+    ? (await io.askSecret(`Paste the key (input is hidden, Enter to skip): `)).trim()
+    : '';
 
   if (!unchanged) {
     io.writeFile(file, workflow);
@@ -133,6 +138,8 @@ export async function runInit(opts: InitOptions, io: InitIo): Promise<number> {
 
   io.log('');
   io.log('Next: commit and push the workflow, then open a pull request.');
-  io.log(`Add more providers any time by adding their secrets (${MENU_PROVIDERS.map((p) => p.secret).join(', ')}).`);
+  io.log(
+    `Add more providers any time by adding their secrets (${MENU_PROVIDERS.map((p) => p.secret).join(', ')}).`,
+  );
   return code;
 }
