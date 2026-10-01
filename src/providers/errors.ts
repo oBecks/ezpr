@@ -94,6 +94,23 @@ const DESCRIPTION: Record<FailureKind, string> = {
   other: 'failed',
 };
 
+const ADVICE: Record<FailureKind, string> = {
+  'rate-limit':
+    'Free tiers have per-minute and daily limits: re-run later, or add another provider key.',
+  server: 'Usually temporary: re-run the workflow.',
+  timeout: 'Usually temporary: re-run the workflow.',
+  network: 'Usually temporary: re-run the workflow.',
+  'bad-output': 'The model did not return a usable review: re-run, or add a stronger provider key.',
+  'context-too-long': 'Split the PR into smaller ones, or add generated paths to `ignore`.',
+  auth: 'Check that the repository secret holds a valid key for this provider.',
+  other: 'See the job log for the error.',
+};
+
+/** What the user can do about a failure of this kind. */
+export function adviceFor(kind: FailureKind): string {
+  return ADVICE[kind];
+}
+
 export function describeFailure(kind: FailureKind): string {
   return DESCRIPTION[kind];
 }

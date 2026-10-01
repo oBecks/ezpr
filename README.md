@@ -1,8 +1,8 @@
-﻿# EzPR
+# EzPR
 
 A free, open-source AI pull request reviewer that runs as a GitHub Action.
 
-> Status: Phase 4. Inline comments, incremental review, and repo context (imports, callers, `REVIEW.md`), with automatic fallback between model providers. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: Phase 5. Inline comments, incremental review, repo context (imports, callers, `REVIEW.md`), `.ezpr.yml` config, and helpful error comments, with automatic fallback between model providers. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Setup
 
@@ -72,6 +72,27 @@ Without a checkout it still reviews, but skips the caller search and says so
 ```
 
 - A PR too large for one model call is reviewed in up to three parts.
+
+## Configuration
+
+Put a `.ezpr.yml` in the repo root. It is read from the base branch, so a PR cannot change
+its own reviewer's settings ([ADR-0009](docs/adr/0009-config-file-from-base-branch.md)).
+
+```yaml
+brains: [groq, gemini] # providers to use, in this order; default: every provider with a key
+strictness: balanced # chill | balanced | strict
+ignore:
+  - docs/**
+  - '*.generated.ts'
+```
+
+- `brains` takes `gemini`, `openrouter`, `groq`, `anthropic`, `openai` and `custom`. A listed
+  provider without an API key is skipped.
+- `strictness` changes how picky the review is and which Findings become inline comments:
+  `chill` only `high` and above, `balanced` (default) `medium` and above, `strict` all.
+- The action inputs `ignore`, `strictness` and `brains` set the same things in the workflow.
+  Ignore lists are combined; for the others the input wins.
+- A bad key is skipped and named in the Summary; the rest of the file still applies.
 
 ## Privacy
 

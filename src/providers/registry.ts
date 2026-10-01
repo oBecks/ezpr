@@ -91,3 +91,14 @@ export function buildBrains(env: Env): Brain[] {
   brains.push(customBrain(env));
   return brains.filter((b): b is Brain => b !== null);
 }
+
+/** Applies the Config file's `brains`: keeps and orders the listed providers; `missing` have no key. */
+export function orderBrains(
+  brains: Brain[],
+  wanted: ProviderId[] | undefined,
+): { brains: Brain[]; missing: ProviderId[] } {
+  if (!wanted) return { brains, missing: [] };
+  const picked = wanted.flatMap((id) => brains.filter((b) => b.provider === id));
+  const missing = wanted.filter((id) => !brains.some((b) => b.provider === id));
+  return { brains: picked, missing };
+}

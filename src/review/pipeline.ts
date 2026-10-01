@@ -1,11 +1,12 @@
 import * as core from '@actions/core';
-import { estimateTokens } from '../context/budget';
+import { diffCost, estimateTokens } from '../context/budget';
 import { chunkFiles } from '../context/chunk';
 import { prepareFiles, type Prepared, type RawFile } from '../context/collect';
-import { makeIgnore, parseIgnore } from '../context/ignore';
+import { makeIgnore } from '../context/ignore';
 import { checkoutReader, checkoutRoot, gatherExtras } from '../context/repo';
 import { loadRules } from '../context/rules';
-import { MAX_CHUNKS } from '../config';
+import { MAX_CHUNKS, STRICTNESS_THRESHOLD } from '../config';
+import type { Settings } from '../context/settings';
 import { writeSticky, type getSticky } from '../github/comments';
 import { fileReader, readerAt } from '../github/pr';
 import { composeSticky, type StickyState } from '../github/sticky';
@@ -14,7 +15,7 @@ import type { Finding } from '../prompt/schema';
 import type { ChainFailure } from '../providers/chain';
 import type { Brain } from '../providers/types';
 import type { Publish } from '../render/publish';
-import { renderNothingToReview, renderReview } from '../render/summary';
+import { renderNothingToReview, renderReview, renderTooLarge } from '../render/summary';
 import { reviewInChunks, type ChunkedResult } from './chunks';
 import { postInlineFindings } from './inline';
 import type { Selection } from './select';
@@ -29,6 +30,7 @@ export interface ReviewJob {
   previous: StickyState | undefined;
   existing: Awaited<ReturnType<typeof getSticky>>;
   publish: Publish;
+  settings: Settings;
 }
 
 type Read = (path: string) => Promise<string | null>;
@@ -75,11 +77,11 @@ function logFailures(failures: ChainFailure[]): void {
 
 async function setUp(job: ReviewJob, primary: Brain): Promise<Setup> {
   const { octokit, repo, pr } = job.gh;
-  const ignored = makeIgnore(parseIgnore(core.getInput('ignore')));
+  const ignored = makeIgnore(job.settings.ignore);
   const read = cached(fileReader(octokit, pr));
   // Project rules come from the base branch so a PR cannot rewrite its own rules (ADR-0006).
   const rules = await loadRules(readerAt(octokit, repo, pr.baseSha));
-  const system = buildSystemPrompt(rules);
+  const system = buildSystemPrompt(rules, job.settings.strictness);
   const prep = await prepareFiles(job.selection.files, read, ignored);
   return { primary, system, ignored, prep, read, hasRules: Boolean(rules) };
 }
@@ -147,7 +149,12 @@ async function publishReview(
   const { octokit, repo, pr } = job.gh;
   const inline = pr.isFork
     ? new Set<Finding>()
-    : await postInlineFindings(job.gh, job.all, done.review.findings);
+    : await postInlineFindings(
+        job.gh,
+        job.all,
+        done.review.findings,
+        STRICTNESS_THRESHOLD[job.settings.strictness],
+      );
   const content = renderReview(done.review, done.used.join(', '), done.ctx, dedupe(done.failures), {
     inline,
     since: job.selection.since,
@@ -156,6 +163,7 @@ async function publishReview(
     unreviewed: done.unreviewed,
     used: done.used,
     noCheckout,
+    configProblems: job.settings.problems,
   });
   if (pr.isFork) return job.publish(content);
   const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
@@ -169,7 +177,12 @@ async function publishReview(
 async function publishNothing(job: ReviewJob, prep: Prepared): Promise<void> {
   core.info('No reviewable files in this PR.');
   if (job.previous?.sha) return;
-  const content = renderNothingToReview(prep, job.selection.files.length);
+  const total = job.selection.files.length;
+  return publishStandalone(job, renderNothingToReview(prep, total, job.settings.problems));
+}
+
+/** Publishes a Summary that is not a Review of the diff (nothing reviewed, or too large). */
+async function publishStandalone(job: ReviewJob, content: string): Promise<void> {
   if (job.gh.pr.isFork) return job.publish(content);
   const { octokit, repo, pr } = job.gh;
   const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
@@ -185,8 +198,15 @@ export async function reviewPr(job: ReviewJob): Promise<void> {
   const root = checkoutRoot(process.env);
   const done = await reviewChunks(job, setup, root);
   if (!done) {
-    core.info('No reviewable files in this PR.');
-    return;
+    // Every diff was larger than one whole call. A PR that already has a Review keeps it.
+    core.info('PR too large: no diff fits a model call.');
+    if (job.previous?.sha) return;
+    const size = {
+      files: setup.prep.candidates.length,
+      tokens: setup.prep.candidates.reduce((n, f) => n + diffCost(f), 0),
+      budget: setup.primary.maxInputTokens - estimateTokens(setup.system),
+    };
+    return publishStandalone(job, renderTooLarge(size, job.settings.problems));
   }
   logContext(setup, done, Boolean(root));
   logFailures(done.failures);

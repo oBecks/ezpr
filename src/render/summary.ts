@@ -3,7 +3,7 @@ import type { Context, Prepared } from '../context/collect';
 import { shortSha } from '../github/sticky';
 import type { Finding, Review } from '../prompt/schema';
 import type { ChainFailure } from '../providers/chain';
-import { describeFailure } from '../providers/errors';
+import { adviceFor, describeFailure } from '../providers/errors';
 
 const ICON = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' } as const;
 
@@ -13,6 +13,16 @@ function paths(list: string[]): string {
   const shown = list.slice(0, MAX_LISTED).map((p) => `\`${p}\``);
   const more = list.length - shown.length;
   return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ');
+}
+
+/** Shown when size cost a Review some files, or all of them. */
+export const SIZE_TIPS =
+  'Try splitting the PR into smaller ones, or add generated or vendored paths to `ignore` (in `.ezpr.yml` or the action input).';
+
+/** Problems with `.ezpr.yml` or the action inputs; the rest of the config still applied. */
+export function renderConfigProblems(problems: string[] = []): string[] {
+  if (!problems.length) return [];
+  return ['> ⚠️ Config problems:', ...problems.map((p) => `> - ${p}`), ''];
 }
 
 export function renderReview(
@@ -32,6 +42,7 @@ export function renderReview(
     used?: string[];
     /** The workflow had no repo checkout, so Caller snippets were not searched. */
     noCheckout?: boolean;
+    configProblems?: string[];
   } = {},
 ): string {
   const lines = ['## EzPR review', ''];
@@ -69,6 +80,7 @@ export function renderReview(
       `> ⚠️ Partial review: ${ctx.files.length} of ${total} changed files were reviewed. The summary above covers only those.`,
       '',
     );
+    if (ctx.droppedDiffs.length) lines.push(`> ${SIZE_TIPS}`, '');
   }
   if (unreviewed.length) {
     lines.push(`> Not reviewed (no model could handle this part): ${paths(unreviewed)}`, '');
@@ -98,6 +110,7 @@ export function renderReview(
   if (failures.length) {
     lines.push(`> ${renderFailures(failures, opts.used)}`, '');
   }
+  lines.push(...renderConfigProblems(opts.configProblems));
   lines.push(`<sub>Reviewed by EzPR using \`${brainId}\`</sub>`);
   return lines.join('\n');
 }
@@ -114,7 +127,11 @@ export function renderFailures(failures: ChainFailure[], used: string[] = []): s
 }
 
 /** The Summary for a PR where every changed file was skipped before reaching a model. */
-export function renderNothingToReview(prep: Omit<Prepared, 'candidates'>, total: number): string {
+export function renderNothingToReview(
+  prep: Omit<Prepared, 'candidates'>,
+  total: number,
+  configProblems: string[] = [],
+): string {
   const lines = [
     '## EzPR review',
     '',
@@ -135,7 +152,26 @@ export function renderNothingToReview(prep: Omit<Prepared, 'candidates'>, total:
   if (prep.skippedNoise.length) {
     lines.push(`- Generated, binary or lock files: ${paths(prep.skippedNoise)}`);
   }
-  return lines.join('\n');
+  lines.push('', ...renderConfigProblems(configProblems));
+  return lines.join('\n').trimEnd();
+}
+
+/** The Summary for a PR whose files all had diffs too big for one model call. */
+export function renderTooLarge(
+  size: { files: number; tokens: number; budget: number },
+  configProblems: string[] = [],
+): string {
+  return [
+    '## EzPR review',
+    '',
+    `This PR is too large to review: ${size.files} changed file(s), about ${size.tokens.toLocaleString('en-US')} tokens of diff, and no model call can take more than about ${size.budget.toLocaleString('en-US')}. Nothing was sent to a model.`,
+    '',
+    SIZE_TIPS,
+    '',
+    ...renderConfigProblems(configProblems),
+  ]
+    .join('\n')
+    .trimEnd();
 }
 
 export function renderSetupComment(): string {
@@ -157,12 +193,27 @@ export function renderSetupComment(): string {
   ].join('\n');
 }
 
+/** One bullet per Brain and failure kind, each with what to do about it. */
+function renderFailureAdvice(failures: ChainFailure[]): string[] {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const f of failures) {
+    const key = `${f.brain}:${f.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`- \`${f.brain}\` ${describeFailure(f.kind)}. ${adviceFor(f.kind)}`);
+  }
+  return lines;
+}
+
 export function renderErrorComment(message: string, failures: ChainFailure[] = []): string {
   return [
     SUMMARY_MARKER,
     '## EzPR could not complete the review',
     '',
-    failures.length ? renderFailures(failures) : message,
+    ...(failures.length
+      ? ['Every model failed:', '', ...renderFailureAdvice(failures)]
+      : [message]),
     '',
     'The job log has details. Re-push or re-run the workflow to try again.',
   ].join('\n');

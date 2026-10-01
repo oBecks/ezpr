@@ -53,7 +53,16 @@ A repo-local file that a changed file imports (one hop only), sent whole as back
 A few lines around a place outside the changed files that uses a symbol the pull request changed. Not itself under review.
 
 **Ignore list**:
-Path globs, set by the Action's `ignore` input, that are never sent to a Brain.
+Path globs, set by the Action's `ignore` input and the Config file, that are never sent to a Brain.
 
 **Chunk**:
 A group of changed files reviewed in one Brain call when the diffs alone do not fit one Brain's budget. A Review has at most three; each walks the Fallback chain on its own, and their Findings are merged. A Chunk tries Brains that fit it whole first (ADR-0008). Files of a Chunk no Brain could review are reported as not reviewed, and the Summary states how many changed files were reviewed.
+
+**Config file**:
+The repo's `.ezpr.yml`, read from the base branch like Project rules. Sets Brain order, Strictness and ignored paths. Invalid keys are skipped one by one and named in the Summary; the rest still applies. Where the Action's inputs and the Config file overlap, the Ignore list is the union of both and other settings take the input.
+
+**Strictness**:
+`chill`, `balanced` (default) or `strict`. Sets how picky the Brain is told to be and the Severity threshold: chill = `high`, balanced = `medium`, strict = `low`.
+
+**Too large**:
+A PR where size left no file reviewable. EzPR posts a dedicated comment with file and token counts and advice (split the PR, add ignore globs), instead of a Review.

@@ -10,6 +10,12 @@ describe('buildSystemPrompt', () => {
     expect(buildSystemPrompt(null)).toBe(SYSTEM_PROMPT);
     expect(buildSystemPrompt('No TODOs.')).toContain('No TODOs.');
   });
+
+  it('leaves the prompt as is for balanced and changes the tone otherwise', () => {
+    expect(buildSystemPrompt(null, 'balanced')).toBe(SYSTEM_PROMPT);
+    expect(buildSystemPrompt(null, 'chill')).toContain('Be conservative');
+    expect(buildSystemPrompt('Rule A', 'strict')).toMatch(/Be thorough[\s\S]*Rule A/);
+  });
 });
 
 describe('buildPrompt', () => {

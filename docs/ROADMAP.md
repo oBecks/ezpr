@@ -39,10 +39,12 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 - Chunk large PRs: only when diffs alone exceed a Brain's budget; at most 3 calls, each walking the chain; merge and dedupe Findings, place against the full-PR diff; footer lists every Brain used.
 - Tests: pure functions plus temp-dir fixtures, no network.
 
-## Phase 5: Config and errors
+## Phase 5: Config and errors (done)
 
-- `.ezpr.yml`: brain order, strictness (chill/balanced/strict), ignored paths, language, custom rules.
-- Helpful comments for no keys, all Brains failed, PR too large.
+- `.ezpr.yml` from the base branch (ADR-0009): `brains` (reorder/subset providers that have keys), `strictness` (chill/balanced/strict: prompt tone plus inline threshold high/medium/low), `ignore`. No `language` (output stays English) and no custom rules (`REVIEW.md` covers them).
+- Action inputs `ignore`, `strictness`, `brains` merge with the file: ignore lists are unioned, the input wins for the rest.
+- Invalid keys are skipped one by one and named in the Summary; the rest of the file still applies. Parsed with `yaml` and zod.
+- Helpful comments: no keys (Setup comment), all Brains failed (each failure with a fix), PR too large (counts and tips; a partial review gets the tips line). A PR that already has a Review keeps it when a later run fails or finds nothing.
 
 ## Phase 6: Commands, CLI, release
 

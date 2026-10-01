@@ -1,4 +1,4 @@
-﻿export type ProviderId = 'gemini' | 'openrouter' | 'groq' | 'anthropic' | 'openai' | 'custom';
+export type ProviderId = 'gemini' | 'openrouter' | 'groq' | 'anthropic' | 'openai' | 'custom';
 
 export interface ProviderDefaults {
   id: ProviderId;
@@ -51,6 +51,15 @@ export const SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
 export type Severity = (typeof SEVERITIES)[number];
 /** Findings at least this severe become inline comments; the rest stay in the Summary. */
 export const INLINE_MIN_SEVERITY: Severity = 'medium';
+
+export const STRICTNESS_LEVELS = ['chill', 'balanced', 'strict'] as const;
+export type Strictness = (typeof STRICTNESS_LEVELS)[number];
+/** How picky the Brain is told to be also moves the Severity threshold for inline comments. */
+export const STRICTNESS_THRESHOLD: Record<Strictness, Severity> = {
+  chill: 'high',
+  balanced: INLINE_MIN_SEVERITY,
+  strict: 'low',
+};
 /** Earlier reviews kept in the collapsed history; older ones are dropped to stay under the comment size limit. */
 export const MAX_HISTORY = 10;
 /** A large PR is reviewed in at most this many Brain calls (Chunks). */

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Context } from '../src/context/collect';
-import { renderFailures, renderNothingToReview, renderReview } from '../src/render/summary';
+import {
+  renderErrorComment,
+  renderFailures,
+  renderNothingToReview,
+  renderReview,
+  renderTooLarge,
+} from '../src/render/summary';
 
 const file = (path: string) => ({ path, status: 'modified', patch: '+x' });
 const ctx = (over: Partial<Context> = {}): Context => ({
@@ -88,5 +94,54 @@ describe('renderNothingToReview', () => {
     expect(text).toContain('`ignore` list');
     expect(text).toContain('`package-lock.json`');
     expect(text).not.toContain('Secret-like');
+  });
+});
+
+describe('Phase 5 comments', () => {
+  it('shows config problems in a Review and gives size tips on a trimmed one', () => {
+    const text = renderReview(review, 'g', ctx({ droppedDiffs: ['big.ts'] }), [], {
+      configProblems: ['Unknown key `x` was ignored.'],
+    });
+    expect(text).toContain('Config problems');
+    expect(text).toContain('Unknown key `x` was ignored.');
+    expect(text).toContain('splitting the PR');
+  });
+
+  it('gives no size tips when nothing was trimmed', () => {
+    expect(renderReview(review, 'g', ctx())).not.toContain('splitting the PR');
+  });
+
+  it('explains a too-large PR with counts and tips', () => {
+    const text = renderTooLarge({ files: 3, tokens: 250_000, budget: 98_000 }, ['bad key']);
+    expect(text).toContain('too large to review: 3 changed file(s)');
+    expect(text).toContain('250,000');
+    expect(text).toContain('98,000');
+    expect(text).toContain('splitting the PR');
+    expect(text).toContain('bad key');
+  });
+
+  it('adds config problems to the nothing-to-review Summary', () => {
+    const prep = {
+      skippedNoise: ['a.lock'],
+      skippedSecrets: [],
+      skippedIgnored: [],
+      missingPatch: [],
+    };
+    expect(renderNothingToReview(prep, 1, ['bad key'])).toContain('bad key');
+  });
+
+  it('names each failed Brain once with advice when every model failed', () => {
+    const text = renderErrorComment('x', [
+      { brain: 'gemini/g', kind: 'auth', error: 'e' },
+      { brain: 'gemini/g', kind: 'auth', error: 'e2' },
+      { brain: 'groq/m', kind: 'rate-limit', error: 'e' },
+    ]);
+    expect(text.match(/`gemini\/g`/g)).toHaveLength(1);
+    expect(text).toContain('check the secret');
+    expect(text).toContain('re-run later');
+  });
+
+  it('keeps the plain message when there are no Brain failures', () => {
+    expect(renderErrorComment('boom')).toContain('boom');
   });
 });

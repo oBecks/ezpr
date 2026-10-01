@@ -1,5 +1,5 @@
-﻿import { describe, expect, it } from 'vitest';
-import { buildBrains } from '../src/providers/registry';
+import { describe, expect, it } from 'vitest';
+import { buildBrains, orderBrains } from '../src/providers/registry';
 
 describe('buildBrains', () => {
   it('returns nothing without credentials, ignoring empty secrets', () => {
@@ -44,5 +44,19 @@ describe('buildBrains', () => {
   it('does not repeat the provider name when the model already has it', () => {
     const [b] = buildBrains({ OPENROUTER_API_KEY: 'r' });
     expect(b?.id).toBe('openrouter/free');
+  });
+});
+
+describe('orderBrains', () => {
+  const brains = buildBrains({ GEMINI_API_KEY: 'k', GROQ_API_KEY: 'g', OPENAI_API_KEY: 'o' });
+
+  it('keeps the default chain when nothing is listed', () => {
+    expect(orderBrains(brains, undefined)).toEqual({ brains, missing: [] });
+  });
+
+  it('reorders, drops unlisted providers and reports listed ones without a key', () => {
+    const got = orderBrains(brains, ['openai', 'anthropic', 'gemini']);
+    expect(got.brains.map((b) => b.provider)).toEqual(['openai', 'gemini']);
+    expect(got.missing).toEqual(['anthropic']);
   });
 });

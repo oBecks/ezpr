@@ -11,6 +11,12 @@ inputs:
   ignore:
     description: Newline-separated path globs that are never sent to a model.
     default: ''
+  strictness:
+    description: How picky the review is - chill, balanced or strict. Overrides .ezpr.yml.
+    default: ''
+  brains:
+    description: Comma- or newline-separated provider ids to use, in order. Overrides .ezpr.yml.
+    default: ''
 runs:
   using: node24
   main: dist/index.cjs
