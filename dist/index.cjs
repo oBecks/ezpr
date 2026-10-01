@@ -17036,8 +17036,8 @@ var require_util7 = __commonJS({
           return false;
         }
       }
-      const num = Number.parseInt(value, 10);
-      return num >= 8 && num <= 15;
+      const num2 = Number.parseInt(value, 10);
+      return num2 >= 8 && num2 <= 15;
     }
     var hasIntl = typeof process.versions.icu === "string";
     var fatalDecoder = hasIntl ? new TextDecoder("utf-8", { fatal: true }) : void 0;
@@ -22179,9 +22179,9 @@ var require_stringifyNumber = __commonJS({
     function stringifyNumber({ format, minFractionDigits, tag, value }) {
       if (typeof value === "bigint")
         return String(value);
-      const num = typeof value === "number" ? value : Number(value);
-      if (!isFinite(num))
-        return isNaN(num) ? ".nan" : num < 0 ? "-.inf" : ".inf";
+      const num2 = typeof value === "number" ? value : Number(value);
+      if (!isFinite(num2))
+        return isNaN(num2) ? ".nan" : num2 < 0 ? "-.inf" : ".inf";
       let n = Object.is(value, -0) ? "-0" : JSON.stringify(value);
       if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^-?\d/.test(n) && !n.includes("e")) {
         let i = n.indexOf(".");
@@ -22221,8 +22221,8 @@ var require_float = __commonJS({
       test: /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/,
       resolve: (str) => parseFloat(str),
       stringify(node2) {
-        const num = Number(node2.value);
-        return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node2);
+        const num2 = Number(node2.value);
+        return isFinite(num2) ? num2.toExponential() : stringifyNumber.stringifyNumber(node2);
       }
     };
     var float = {
@@ -22661,8 +22661,8 @@ var require_float2 = __commonJS({
       test: /^[-+]?(?:[0-9][0-9_]*)?(?:\.[0-9_]*)?[eE][-+]?[0-9]+$/,
       resolve: (str) => parseFloat(str.replace(/_/g, "")),
       stringify(node2) {
-        const num = Number(node2.value);
-        return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node2);
+        const num2 = Number(node2.value);
+        return isFinite(num2) ? num2.toExponential() : stringifyNumber.stringifyNumber(node2);
       }
     };
     var float = {
@@ -22864,23 +22864,23 @@ var require_timestamp = __commonJS({
     function parseSexagesimal(str, asBigInt) {
       const sign = str[0];
       const parts = sign === "-" || sign === "+" ? str.substring(1) : str;
-      const num = (n) => asBigInt ? BigInt(n) : Number(n);
-      const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num(60) + num(p), num(0));
-      return sign === "-" ? num(-1) * res : res;
+      const num2 = (n) => asBigInt ? BigInt(n) : Number(n);
+      const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num2(60) + num2(p), num2(0));
+      return sign === "-" ? num2(-1) * res : res;
     }
     function stringifySexagesimal(node2) {
       let { value } = node2;
-      let num = (n) => n;
+      let num2 = (n) => n;
       if (typeof value === "bigint")
-        num = (n) => BigInt(n);
+        num2 = (n) => BigInt(n);
       else if (isNaN(value) || !isFinite(value))
         return stringifyNumber.stringifyNumber(node2);
       let sign = "";
       if (value < 0) {
         sign = "-";
-        value *= num(-1);
+        value *= num2(-1);
       }
-      const _60 = num(60);
+      const _60 = num2(60);
       const parts = [value % _60];
       if (value < 60) {
         parts.unshift(0);
@@ -32531,35 +32531,37 @@ function getOctokit(token, options, ...additionalPlugins) {
 }
 
 // src/commands/event.ts
-var obj = (v) => typeof v === "object" && v !== null ? v : void 0;
-function commandEventFrom(eventName, payload) {
-  if (payload["action"] !== "created") return null;
+var obj = (v) => typeof v === "object" && v !== null ? v : {};
+var num = (v) => typeof v === "number" ? v : void 0;
+function commentFields(payload) {
   const comment = obj(payload["comment"]);
-  if (!comment || typeof comment["id"] !== "number" || typeof comment["body"] !== "string") {
-    return null;
-  }
-  const base = {
-    commentId: comment["id"],
+  const commentId = num(comment["id"]);
+  if (payload["action"] !== "created" || commentId === void 0) return null;
+  if (typeof comment["body"] !== "string") return null;
+  return {
+    commentId,
     body: comment["body"],
     authorAssociation: String(comment["author_association"] ?? ""),
-    userType: String(obj(comment["user"])?.["type"] ?? "")
+    userType: String(obj(comment["user"])["type"] ?? ""),
+    replyTo: num(comment["in_reply_to_id"])
   };
-  if (eventName === "issue_comment") {
-    const issue3 = obj(payload["issue"]);
-    if (!issue3?.["pull_request"] || typeof issue3["number"] !== "number") return null;
-    return { ...base, where: "conversation", prNumber: issue3["number"] };
-  }
-  if (eventName === "pull_request_review_comment") {
-    const pull = obj(payload["pull_request"]);
-    if (typeof pull?.["number"] !== "number") return null;
-    const replyTo = comment["in_reply_to_id"];
-    return {
-      ...base,
-      where: "thread",
-      prNumber: pull["number"],
-      threadRootId: typeof replyTo === "number" ? replyTo : comment["id"]
-    };
-  }
+}
+function conversationEvent(payload, fields) {
+  const issue3 = obj(payload["issue"]);
+  const prNumber = num(issue3["number"]);
+  if (!issue3["pull_request"] || prNumber === void 0) return null;
+  return { ...fields, where: "conversation", prNumber };
+}
+function threadEvent(payload, fields, replyTo) {
+  const prNumber = num(obj(payload["pull_request"])["number"]);
+  if (prNumber === void 0) return null;
+  return { ...fields, where: "thread", prNumber, threadRootId: replyTo ?? fields.commentId };
+}
+function commandEventFrom(eventName, payload) {
+  const { replyTo, ...fields } = commentFields(payload) ?? {};
+  if (!("commentId" in fields)) return null;
+  if (eventName === "issue_comment") return conversationEvent(payload, fields);
+  if (eventName === "pull_request_review_comment") return threadEvent(payload, fields, replyTo);
   return null;
 }
 
@@ -53973,8 +53975,8 @@ function isIPv4(hostname3) {
   const parts = hostname3.split(".");
   if (parts.length !== 4) return false;
   return parts.every((part) => {
-    const num = Number(part);
-    return Number.isInteger(num) && num >= 0 && num <= 255 && String(num) === part;
+    const num2 = Number(part);
+    return Number.isInteger(num2) && num2 >= 0 && num2 <= 255 && String(num2) === part;
   });
 }
 function isPrivateIPv4(ip) {
@@ -91566,7 +91568,10 @@ async function handleCommand(octokit, repo, ev) {
   await acknowledge(octokit, repo, ev).catch(
     (err) => warning(`Reaction failed: ${errorText(err)}`)
   );
-  switch (parsed.name) {
+  return runCommand(octokit, repo, ev, parsed.name);
+}
+function runCommand(octokit, repo, ev, name5) {
+  switch (name5) {
     case "review":
       return reviewPullRequest(octokit, repo, ev.prNumber, { fromCommand: true, force: true });
     case "explain":

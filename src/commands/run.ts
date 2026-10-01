@@ -6,7 +6,7 @@ import type { CommandEvent } from './event';
 import { explainFinding, explainPullRequest } from './explain';
 import { mayRunCommands } from './gate';
 import { ignoreFinding } from './ignore';
-import { parseCommand } from './parse';
+import { parseCommand, type CommandName } from './parse';
 import { acknowledge, reply } from './reply';
 
 /** Command names sit inside backticks mid-line, so this reply can never parse as a Command. */
@@ -34,7 +34,16 @@ export async function handleCommand(octokit: Octokit, repo: Repo, ev: CommandEve
   await acknowledge(octokit, repo, ev).catch((err) =>
     core.warning(`Reaction failed: ${errorText(err)}`),
   );
-  switch (parsed.name) {
+  return runCommand(octokit, repo, ev, parsed.name);
+}
+
+function runCommand(
+  octokit: Octokit,
+  repo: Repo,
+  ev: CommandEvent,
+  name: CommandName,
+): Promise<void> {
+  switch (name) {
     case 'review':
       return reviewPullRequest(octokit, repo, ev.prNumber, { fromCommand: true, force: true });
     case 'explain':
