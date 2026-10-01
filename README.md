@@ -47,8 +47,8 @@ jobs:
   review:
     if: >-
       (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@ezpr')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@ezpr'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@ezpr') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@ezpr') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,8 +82,10 @@ run them; anyone else is silently ignored, so strangers cannot spend your API qu
 EzPR reacts with 👀 when it takes a command up. Dismissals are remembered in the Summary
 comment, so nothing in your repository changes.
 
-Commands work on pull requests from forks too: a command run has a write token, so EzPR can
-comment on the fork's PR. It only ever reads the PR's code as text, never runs it
+Commands in the PR conversation work on pull requests from forks too: that run has a write
+token, so EzPR can comment on the fork's PR. (Replies inside an inline thread arrive as a
+different event, which GitHub runs read-only and without secrets for forks, so `explain` and
+`ignore` in a thread do nothing there.) It only ever reads the PR's code as text, never runs it
 ([ADR-0010](docs/adr/0010-commands-may-review-fork-prs.md)). Command runs are not
 checked out, so they skip the caller search described below.
 
