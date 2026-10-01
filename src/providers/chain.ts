@@ -22,6 +22,8 @@ export class ChainError extends Error {
 export interface ChainOptions {
   /** A Retry-After longer than this sends us to the next Brain instead of waiting. */
   maxRetryAfterMs?: number;
+  /** Pause before the single retry after a server error (5xx). */
+  serverRetryDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -29,7 +31,7 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 
 /**
  * Tries each Brain in order (ADR-0002). Each Brain gets at most one retry: a repair attempt
- * after invalid output, or one wait after a short Retry-After. A rejected key (401/403) skips
+ * after invalid output, one wait after a short Retry-After, or one pause after a server error. A rejected key (401/403) skips
  * that Brain and is reported rather than retried.
  */
 export async function runChain<T>(
@@ -37,7 +39,7 @@ export async function runChain<T>(
   run: (brain: Brain) => Promise<T>,
   opts: ChainOptions = {},
 ): Promise<ChainSuccess<T>> {
-  const { maxRetryAfterMs = 10_000, sleep = defaultSleep } = opts;
+  const { maxRetryAfterMs = 10_000, serverRetryDelayMs = 2_000, sleep = defaultSleep } = opts;
   const failures: ChainFailure[] = [];
 
   for (const brain of brains) {
@@ -59,6 +61,11 @@ export async function runChain<T>(
         ) {
           retried = true;
           await sleep(c.retryAfterMs);
+          continue;
+        }
+        if (!retried && c.kind === 'server') {
+          retried = true;
+          await sleep(serverRetryDelayMs);
           continue;
         }
         failures.push({ brain: brain.id, kind: c.kind, error: c.message });

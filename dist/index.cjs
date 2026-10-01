@@ -55342,7 +55342,7 @@ var ChainError = class extends Error {
 };
 var defaultSleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
 async function runChain(brains, run2, opts = {}) {
-  const { maxRetryAfterMs = 1e4, sleep = defaultSleep } = opts;
+  const { maxRetryAfterMs = 1e4, serverRetryDelayMs = 2e3, sleep = defaultSleep } = opts;
   const failures = [];
   for (const brain of brains) {
     let retried = false;
@@ -55358,6 +55358,11 @@ async function runChain(brains, run2, opts = {}) {
         if (!retried && c.kind === "rate-limit" && c.retryAfterMs !== void 0 && c.retryAfterMs <= maxRetryAfterMs) {
           retried = true;
           await sleep(c.retryAfterMs);
+          continue;
+        }
+        if (!retried && c.kind === "server") {
+          retried = true;
+          await sleep(serverRetryDelayMs);
           continue;
         }
         failures.push({ brain: brain.id, kind: c.kind, error: c.message });

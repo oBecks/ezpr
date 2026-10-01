@@ -45,13 +45,40 @@ describe('runChain', () => {
     expect(r.failures).toEqual([{ brain: 'a', kind: 'rate-limit', error: 'HTTP 429' }]);
   });
 
-  it('falls back on 5xx', async () => {
+  it('retries a 5xx once after a pause, then falls back', async () => {
     const [a, b] = [brain('a'), brain('b')];
-    const r = await runChain([a, b], async (x) => {
-      if (x === a) throw http(503);
-      return x.id;
-    });
+    const slept: number[] = [];
+    let aCalls = 0;
+    const r = await runChain(
+      [a, b],
+      async (x) => {
+        if (x === a) {
+          aCalls++;
+          throw http(503);
+        }
+        return x.id;
+      },
+      { sleep: async (ms) => void slept.push(ms) },
+    );
+    expect(aCalls).toBe(2);
+    expect(slept).toEqual([2000]);
+    expect(r.brain).toBe(b);
     expect(r.failures[0]?.kind).toBe('server');
+  });
+
+  it('succeeds when the retry after a 5xx works', async () => {
+    const a = brain('a');
+    let calls = 0;
+    const r = await runChain(
+      [a],
+      async (x) => {
+        if (++calls === 1) throw http(503);
+        return x.id;
+      },
+      noSleep,
+    );
+    expect(r.brain).toBe(a);
+    expect(r.failures).toEqual([]);
   });
 
   it('waits once for a short Retry-After and retries the same brain', async () => {
@@ -128,9 +155,13 @@ describe('runChain', () => {
   });
 
   it('throws ChainError with every failure when all brains fail', async () => {
-    const err = await runChain([brain('a'), brain('b')], async () => {
-      throw http(500);
-    }).catch((e) => e);
+    const err = await runChain(
+      [brain('a'), brain('b')],
+      async () => {
+        throw http(500);
+      },
+      noSleep,
+    ).catch((e) => e);
     expect(err).toBeInstanceOf(ChainError);
     expect((err as ChainError).failures.map((f) => f.brain)).toEqual(['a', 'b']);
   });
