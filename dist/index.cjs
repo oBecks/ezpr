@@ -25225,7 +25225,6 @@ function fitToBudget(files, budgetTokens) {
       droppedDiffs.push(f.path);
       continue;
     }
-    used += cost;
     kept.push({ ...f, content: void 0 });
   }
   const candidates = files.filter((f) => f.content !== void 0 && kept.some((k) => k.path === f.path)).sort((a, b) => (a.content?.length ?? 0) - (b.content?.length ?? 0));
