@@ -27,6 +27,10 @@ function retryAfterMs(headers: Record<string, string> | undefined): number | und
   return undefined;
 }
 
+/** Some providers (Google) answer a bad key with 400 instead of 401. */
+const BAD_KEY =
+  /api[ _-]?key.*(invalid|not valid|incorrect)|invalid.*api[ _-]?key|incorrect api key/i;
+
 const TOO_LONG = /context|too (long|large)|maximum.*tokens|token limit|exceeds/i;
 
 /** Decides what a failure means for the chain (see ADR-0002). */
@@ -38,7 +42,9 @@ export function classify(err: unknown): Classified {
     if (status === 429) {
       return { kind: 'rate-limit', message, retryAfterMs: retryAfterMs(err.responseHeaders) };
     }
-    if (status === 401 || status === 403) return { kind: 'auth', message };
+    if (status === 401 || status === 403 || (status === 400 && BAD_KEY.test(message))) {
+      return { kind: 'auth', message };
+    }
     if (status === 408) return { kind: 'timeout', message };
     if (status === 413 || (status === 400 && TOO_LONG.test(message))) {
       return { kind: 'context-too-long', message };

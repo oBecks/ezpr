@@ -55291,6 +55291,7 @@ function retryAfterMs(headers) {
   if (Number.isFinite(secs) && secs >= 0 && lower["retry-after"]) return secs * 1e3;
   return void 0;
 }
+var BAD_KEY = /api[ _-]?key.*(invalid|not valid|incorrect)|invalid.*api[ _-]?key|incorrect api key/i;
 var TOO_LONG = /context|too (long|large)|maximum.*tokens|token limit|exceeds/i;
 function classify(err) {
   const message = err instanceof Error ? err.message : String(err);
@@ -55299,7 +55300,9 @@ function classify(err) {
     if (status === 429) {
       return { kind: "rate-limit", message, retryAfterMs: retryAfterMs(err.responseHeaders) };
     }
-    if (status === 401 || status === 403) return { kind: "auth", message };
+    if (status === 401 || status === 403 || status === 400 && BAD_KEY.test(message)) {
+      return { kind: "auth", message };
+    }
     if (status === 408) return { kind: "timeout", message };
     if (status === 413 || status === 400 && TOO_LONG.test(message)) {
       return { kind: "context-too-long", message };
@@ -82545,7 +82548,8 @@ var REQUEST_TIMEOUT_MS = 12e4;
 function aiSdkBrain(opts) {
   return {
     provider: opts.provider,
-    id: `${opts.provider}/${opts.modelName}`,
+    // Avoid "openrouter/openrouter/free" when the model name already carries the provider.
+    id: opts.modelName.startsWith(`${opts.provider}/`) ? opts.modelName : `${opts.provider}/${opts.modelName}`,
     maxInputTokens: opts.maxInputTokens,
     async review(system, prompt) {
       const { object: object2 } = await generateObject({
