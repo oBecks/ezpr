@@ -30,6 +30,13 @@ describe('classify', () => {
     expect(classify(http(400, 'bad field')).kind).toBe('other');
   });
 
+  it('treats a 400 about an invalid API key as auth (Google style)', () => {
+    expect(classify(http(400, 'API key not valid. Please pass a valid API key.')).kind).toBe(
+      'auth',
+    );
+    expect(classify(http(400, 'Incorrect API key provided')).kind).toBe('auth');
+  });
+
   it('treats a response-less API error as a network error', () => {
     expect(classify(http(undefined)).kind).toBe('network');
   });

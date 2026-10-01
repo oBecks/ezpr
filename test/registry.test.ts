@@ -40,4 +40,9 @@ describe('buildBrains', () => {
     const [b] = buildBrains({ GROQ_API_KEY: 'g', EZPR_GROQ_MODEL: 'other/model' });
     expect(b?.id).toBe('groq/other/model');
   });
+
+  it('does not repeat the provider name when the model already has it', () => {
+    const [b] = buildBrains({ OPENROUTER_API_KEY: 'r' });
+    expect(b?.id).toBe('openrouter/free');
+  });
 });

@@ -14,7 +14,10 @@ export function aiSdkBrain(opts: {
 }): Brain {
   return {
     provider: opts.provider,
-    id: `${opts.provider}/${opts.modelName}`,
+    // Avoid "openrouter/openrouter/free" when the model name already carries the provider.
+    id: opts.modelName.startsWith(`${opts.provider}/`)
+      ? opts.modelName
+      : `${opts.provider}/${opts.modelName}`,
     maxInputTokens: opts.maxInputTokens,
     async review(system, prompt) {
       const { object } = await generateObject({
