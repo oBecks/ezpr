@@ -30,6 +30,12 @@ describe('classify', () => {
     expect(classify(http(400, 'bad field')).kind).toBe('other');
   });
 
+  it('treats a 400 asking to reduce the message length (Groq) as context-too-long', () => {
+    expect(
+      classify(http(400, 'Please reduce the length of the messages or completion.')).kind,
+    ).toBe('context-too-long');
+  });
+
   it('treats a 400 about an invalid API key as auth (Google style)', () => {
     expect(classify(http(400, 'API key not valid. Please pass a valid API key.')).kind).toBe(
       'auth',

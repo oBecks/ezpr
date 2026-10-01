@@ -82596,7 +82596,7 @@ function retryAfterFromMessage(message) {
   return Math.ceil(m[2]?.toLowerCase() === "ms" ? n : n * 1e3);
 }
 var BAD_KEY = /api[ _-]?key.*(invalid|not valid|incorrect)|invalid.*api[ _-]?key|incorrect api key/i;
-var TOO_LONG = /context|too (long|large)|maximum.*tokens|token limit|exceeds/i;
+var TOO_LONG = /context|too (long|large)|maximum.*tokens|token limit|exceeds|reduce the length/i;
 function classify(err) {
   const message = err instanceof Error ? err.message : String(err);
   if (APICallError.isInstance(err)) {
@@ -82730,6 +82730,12 @@ function renderReview(review, brainId, ctx, failures = [], opts = {}) {
   }
   if (unreviewed.length) {
     lines.push(`> Not reviewed (no model could handle this part): ${paths(unreviewed)}`, "");
+  }
+  if (ctx.missingPatch.length) {
+    lines.push(
+      `> No diff available from GitHub (the change is too large; try splitting the PR): ${paths(ctx.missingPatch)}`,
+      ""
+    );
   }
   const skipped = [...ctx.skippedIgnored, ...ctx.skippedSecrets];
   if (skipped.length) {

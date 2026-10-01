@@ -73,6 +73,12 @@ export function renderReview(
   if (unreviewed.length) {
     lines.push(`> Not reviewed (no model could handle this part): ${paths(unreviewed)}`, '');
   }
+  if (ctx.missingPatch.length) {
+    lines.push(
+      `> No diff available from GitHub (the change is too large; try splitting the PR): ${paths(ctx.missingPatch)}`,
+      '',
+    );
+  }
   const skipped = [...ctx.skippedIgnored, ...ctx.skippedSecrets];
   if (skipped.length) {
     lines.push(`> Not sent to a model (ignore list or secret-like files): ${paths(skipped)}`, '');

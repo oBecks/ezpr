@@ -46,6 +46,12 @@ describe('renderReview coverage', () => {
     expect(text).toContain('`src/secret-notes.ts`, `.env`');
   });
 
+  it('names files GitHub sent no diff for', () => {
+    const text = renderReview(review, 'g', ctx({ missingPatch: ['src/huge.ts'] }));
+    expect(text).toContain('No diff available from GitHub');
+    expect(text).toContain('`src/huge.ts`');
+  });
+
   it('caps long path lists', () => {
     const many = Array.from({ length: 13 }, (_, i) => `f${i}.ts`);
     expect(renderReview(review, 'g', ctx({ skippedIgnored: many }))).toContain('and 3 more');

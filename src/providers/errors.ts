@@ -40,7 +40,7 @@ function retryAfterFromMessage(message: string): number | undefined {
 const BAD_KEY =
   /api[ _-]?key.*(invalid|not valid|incorrect)|invalid.*api[ _-]?key|incorrect api key/i;
 
-const TOO_LONG = /context|too (long|large)|maximum.*tokens|token limit|exceeds/i;
+const TOO_LONG = /context|too (long|large)|maximum.*tokens|token limit|exceeds|reduce the length/i;
 
 /** Decides what a failure means for the chain (see ADR-0002). */
 export function classify(err: unknown): Classified {
