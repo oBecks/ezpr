@@ -1,5 +1,7 @@
-import { fitToBudget, type FileEntry } from './budget';
+import { fitToBudget, type Extras, type FileEntry } from './budget';
+import type { CallerSnippet } from './callers';
 import { skipReason } from './filter';
+import type { ImportedFile } from './imports';
 import { redact } from './redact';
 
 export interface RawFile {
@@ -10,20 +12,31 @@ export interface RawFile {
 
 export interface Context {
   files: FileEntry[];
+  callers: CallerSnippet[];
+  imports: ImportedFile[];
   skippedNoise: string[];
   skippedSecrets: string[];
   droppedDiffs: string[];
   droppedContents: string[];
+  droppedCallers: number;
+  droppedImports: string[];
 }
 
 /** Maximum size of one file's full content we will consider sending. */
 const MAX_FILE_CHARS = 200_000;
 
-export async function collectContext(
+export interface Prepared {
+  candidates: FileEntry[];
+  skippedNoise: string[];
+  skippedSecrets: string[];
+}
+
+/** Filters and redacts the changed files; independent of any Brain's budget. */
+export async function prepareFiles(
   raw: RawFile[],
   readFile: (path: string) => Promise<string | null>,
-  budgetTokens: number,
-): Promise<Context> {
+  ignored: (path: string) => boolean = () => false,
+): Promise<Prepared> {
   const skippedNoise: string[] = [];
   const skippedSecrets: string[] = [];
   const candidates: FileEntry[] = [];
@@ -34,7 +47,7 @@ export async function collectContext(
       skippedSecrets.push(f.path);
       continue;
     }
-    if (reason === 'noise' || !f.patch) {
+    if (reason === 'noise' || ignored(f.path) || !f.patch) {
       skippedNoise.push(f.path);
       continue;
     }
@@ -46,13 +59,35 @@ export async function collectContext(
       content: content !== null && content.length <= MAX_FILE_CHARS ? redact(content) : undefined,
     });
   }
+  return { candidates, skippedNoise, skippedSecrets };
+}
 
-  const fitted = fitToBudget(candidates, budgetTokens);
+/** Fits `files` (a chunk of the prepared candidates) and extras to one Brain's budget. */
+export function buildContext(
+  prepared: Pick<Prepared, 'skippedNoise' | 'skippedSecrets'>,
+  files: FileEntry[],
+  budgetTokens: number,
+  extras: Extras = {},
+): Context {
+  const fitted = fitToBudget(files, budgetTokens, extras);
   return {
     files: fitted.files,
-    skippedNoise,
-    skippedSecrets,
+    callers: fitted.callers,
+    imports: fitted.imports,
+    skippedNoise: prepared.skippedNoise,
+    skippedSecrets: prepared.skippedSecrets,
     droppedDiffs: fitted.droppedDiffs,
     droppedContents: fitted.droppedContents,
+    droppedCallers: fitted.droppedCallers,
+    droppedImports: fitted.droppedImports,
   };
+}
+
+export async function collectContext(
+  raw: RawFile[],
+  readFile: (path: string) => Promise<string | null>,
+  budgetTokens: number,
+): Promise<Context> {
+  const prepared = await prepareFiles(raw, readFile);
+  return buildContext(prepared, prepared.candidates, budgetTokens);
 }

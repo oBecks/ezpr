@@ -12,13 +12,23 @@ export function renderReview(
   brainId: string,
   ctx: Context,
   failures: ChainFailure[] = [],
-  opts: { inline?: ReadonlySet<Finding>; since?: string } = {},
+  opts: {
+    inline?: ReadonlySet<Finding>;
+    since?: string;
+    /** Number of Chunks the Review was split into. */
+    parts?: number;
+    /** The workflow had no repo checkout, so Caller snippets were not searched. */
+    noCheckout?: boolean;
+  } = {},
 ): string {
   const lines = ['## EzPR review', ''];
   if (opts.since) {
     lines.push(`_Incremental review: changes since \`${shortSha(opts.since)}\`._`, '');
   }
   lines.push(review.summary, '');
+  if (opts.parts && opts.parts > 1) {
+    lines.push(`_Large PR: reviewed in ${opts.parts} parts._`, '');
+  }
 
   if (review.findings.length) {
     lines.push('### Findings', '');
@@ -31,10 +41,17 @@ export function renderReview(
     lines.push('');
   }
 
-  const omitted = [...ctx.droppedDiffs, ...ctx.droppedContents];
+  const omitted = [...ctx.droppedDiffs, ...ctx.droppedContents, ...ctx.droppedImports];
+  if (ctx.droppedCallers) omitted.push(`${ctx.droppedCallers} caller snippet(s)`);
   if (omitted.length) {
     const list = omitted.map((p) => `\`${p}\``).join(', ');
     lines.push(`> Some context was left out to fit model limits: ${list}`, '');
+  }
+  if (opts.noCheckout) {
+    lines.push(
+      '> Callers of changed code were not searched: add an `actions/checkout` step before EzPR to enable it.',
+      '',
+    );
   }
   if (failures.length) {
     lines.push(`> ${renderFailures(failures)}`, '');

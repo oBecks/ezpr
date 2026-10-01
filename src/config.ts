@@ -53,3 +53,5 @@ export type Severity = (typeof SEVERITIES)[number];
 export const INLINE_MIN_SEVERITY: Severity = 'medium';
 /** Earlier reviews kept in the collapsed history; older ones are dropped to stay under the comment size limit. */
 export const MAX_HISTORY = 10;
+/** A large PR is reviewed in at most this many Brain calls (Chunks). */
+export const MAX_CHUNKS = 3;

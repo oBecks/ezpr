@@ -2,7 +2,7 @@
 
 A free, open-source AI pull request reviewer that runs as a GitHub Action.
 
-> Status: Phase 2. One summary comment per PR, with automatic fallback between model providers. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: Phase 4. Inline comments, incremental review, and repo context (imports, callers, `REVIEW.md`), with automatic fallback between model providers. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Setup
 
@@ -23,6 +23,7 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: oBecks/ezpr@main
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -49,6 +50,28 @@ that is rejected (401/403) is skipped and called out in the review. The review f
 which model wrote it, and which ones were skipped. Override a model with
 `EZPR_<PROVIDER>_MODEL` (for example `EZPR_GROQ_MODEL`). The custom endpoint also accepts
 `EZPR_MAX_INPUT_TOKENS`. Ollama on `localhost` only works on self-hosted runners.
+
+## Repo context
+
+Add an `actions/checkout` step before EzPR (as in the setup above) and it also sends the
+files your changes import and short snippets of code that calls the symbols you changed.
+Without a checkout it still reviews, but skips the caller search and says so
+([ADR-0007](docs/adr/0007-checkout-optional.md)).
+
+- `REVIEW.md` in the repo root is always included as guidance for the reviewer. It is read
+  from the base branch, so a PR cannot rewrite its own rules
+  ([ADR-0006](docs/adr/0006-review-md-from-base-branch.md)).
+- `ignore:` takes newline-separated path globs that are never sent to a model:
+
+```yaml
+- uses: oBecks/ezpr@main
+  with:
+    ignore: |
+      docs/**
+      *.generated.ts
+```
+
+- A PR too large for one model call is reviewed in up to three parts.
 
 ## Privacy
 

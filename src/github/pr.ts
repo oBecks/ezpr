@@ -8,6 +8,7 @@ export interface PrInfo {
   title: string;
   body: string;
   headSha: string;
+  baseSha: string;
   headRepo: { owner: string; repo: string };
   isFork: boolean;
 }
@@ -25,6 +26,7 @@ export async function loadPr(
     title: data.title,
     body: data.body ?? '',
     headSha: data.head.sha,
+    baseSha: data.base.sha,
     headRepo,
     isFork: !head || head.full_name !== data.base.repo.full_name,
   };
@@ -43,13 +45,14 @@ export async function listChangedFiles(
   return files.map((f) => ({ path: f.filename, status: f.status, patch: f.patch }));
 }
 
-export function fileReader(octokit: Octokit, pr: PrInfo) {
+/** Reads files of `repo` at `ref` through the API; null when missing or not a file. */
+export function readerAt(octokit: Octokit, repo: { owner: string; repo: string }, ref: string) {
   return async (path: string): Promise<string | null> => {
     try {
       const { data } = await octokit.rest.repos.getContent({
-        ...pr.headRepo,
+        ...repo,
         path,
-        ref: pr.headSha,
+        ref,
         mediaType: { format: 'raw' },
       });
       return typeof data === 'string' ? data : null;
@@ -57,6 +60,10 @@ export function fileReader(octokit: Octokit, pr: PrInfo) {
       return null;
     }
   };
+}
+
+export function fileReader(octokit: Octokit, pr: PrInfo) {
+  return readerAt(octokit, pr.headRepo, pr.headSha);
 }
 
 /**

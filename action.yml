@@ -8,6 +8,9 @@ inputs:
   github-token:
     description: Token used to read the PR and post comments.
     default: ${{ github.token }}
+  ignore:
+    description: Newline-separated path globs that are never sent to a model.
+    default: ''
 runs:
   using: node24
   main: dist/index.cjs

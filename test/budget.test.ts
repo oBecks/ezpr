@@ -32,4 +32,22 @@ describe('fitToBudget', () => {
     expect(r.files.map((f) => f.path)).toEqual(['a.ts']);
     expect(r.droppedDiffs).toEqual(['b.ts']);
   });
+
+  it('drops callers, then imports, only after file contents are placed', () => {
+    const a = file('a.ts', 'd', 'x'.repeat(40));
+    const used =
+      estimateTokens('d') + estimateTokens('a.ts') + 10 + estimateTokens(a.content ?? '');
+    const caller = { path: 'c.ts', line: 1, symbol: 'sym', snippet: 'y'.repeat(200) };
+    const imp = { path: 'i.ts', importedBy: 'a.ts', content: 'z'.repeat(40) };
+    const callerCost = estimateTokens(caller.snippet) + estimateTokens(caller.path) + 10;
+
+    const some = fitToBudget([a], used + callerCost - 1, { callers: [caller], imports: [imp] });
+    expect(some.droppedCallers).toBe(1);
+    expect(some.imports.map((i) => i.path)).toEqual(['i.ts']);
+
+    const tight = fitToBudget([a], used, { callers: [caller], imports: [imp] });
+    expect(tight.droppedContents).toEqual([]);
+    expect(tight.droppedCallers).toBe(1);
+    expect(tight.droppedImports).toEqual(['i.ts']);
+  });
 });
