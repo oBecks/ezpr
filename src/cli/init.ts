@@ -117,19 +117,37 @@ async function acceptsDataUse(io: InitIo, provider: MenuProvider): Promise<boole
   return isYes(await io.ask('Continue? [Y/n] '));
 }
 
+/** Tells the user a different workflow is in the way. Never overwritten without --force. */
+function blockedByExisting(
+  io: InitIo,
+  existing: string | null,
+  workflow: string,
+  force: boolean,
+): boolean {
+  if (existing === null || existing === workflow || force) return false;
+  io.log(`${WORKFLOW_PATH} already exists and differs from what EzPR would write:`);
+  io.log('');
+  io.log(simpleDiff(existing, workflow));
+  io.log('');
+  io.log('Nothing was changed. Run again with --force to overwrite it.');
+  return true;
+}
+
+function writeWorkflow(io: InitIo, file: string, existing: string | null, workflow: string): void {
+  if (existing === workflow) {
+    io.log(`${WORKFLOW_PATH} is already up to date.`);
+    return;
+  }
+  io.writeFile(file, workflow);
+  io.log(`Wrote ${WORKFLOW_PATH}.`);
+}
+
 /** `init`: writes the workflow and stores the provider key as a repository secret. Returns the exit code. */
 export async function runInit(opts: InitOptions, io: InitIo): Promise<number> {
   const file = path.join(opts.cwd, WORKFLOW_PATH);
   const workflow = renderWorkflow(opts.ref);
   const existing = io.readFile(file);
-  if (existing !== null && existing !== workflow && !opts.force) {
-    io.log(`${WORKFLOW_PATH} already exists and differs from what EzPR would write:`);
-    io.log('');
-    io.log(simpleDiff(existing, workflow));
-    io.log('');
-    io.log('Nothing was changed. Run again with --force to overwrite it.');
-    return 1;
-  }
+  if (blockedByExisting(io, existing, workflow, opts.force)) return 1;
 
   const provider = await chooseProvider(io);
   if (!provider || !(await acceptsDataUse(io, provider))) {
@@ -146,12 +164,7 @@ export async function runInit(opts: InitOptions, io: InitIo): Promise<number> {
     ? (await io.askSecret('Paste the key (input is hidden, Enter to skip): ')).trim()
     : null;
 
-  if (existing === workflow) {
-    io.log(`${WORKFLOW_PATH} is already up to date.`);
-  } else {
-    io.writeFile(file, workflow);
-    io.log(`Wrote ${WORKFLOW_PATH}.`);
-  }
+  writeWorkflow(io, file, existing, workflow);
   const code = saveKey(io, provider, key, opts.repo);
 
   io.log('');
