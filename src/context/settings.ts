@@ -1,4 +1,4 @@
-﻿import { parse } from 'yaml';
+import { parse } from 'yaml';
 import { z } from 'zod';
 import { PROVIDER_ORDER, STRICTNESS_LEVELS, type ProviderId, type Strictness } from '../config';
 import { parseIgnore } from './ignore';
@@ -25,7 +25,6 @@ export interface SettingsSource {
   problems: string[];
 }
 
-const KNOWN_KEYS = ['brains', 'strictness', 'ignore'];
 const PROVIDER_IDS: ProviderId[] = [...PROVIDER_ORDER.map((p) => p.id), 'custom'];
 
 const strictnessSchema = z.enum(STRICTNESS_LEVELS);
@@ -38,46 +37,75 @@ const ignoreSchema = z.array(z.string());
 
 const empty = (problems: string[] = []): SettingsSource => ({ ignore: [], problems });
 
-/** Parses `.ezpr.yml`. A bad key is skipped and named; the other keys still apply. */
-export function parseConfigFile(text: string | null): SettingsSource {
-  if (text === null || !text.trim()) return empty();
+/** Reads one key into `out`; a bad value is skipped and named in `out.problems`. */
+type KeyReader = (value: unknown, out: SettingsSource, where: string) => void;
+
+const readStrictness: KeyReader = (value, out, where) => {
+  const r = strictnessSchema.safeParse(value);
+  if (r.success) out.strictness = r.data;
+  else out.problems.push(`${where}\`strictness\` must be one of ${STRICTNESS_LEVELS.join(', ')}.`);
+};
+
+const readBrains: KeyReader = (value, out, where) => {
+  const r = brainsSchema.safeParse(value);
+  if (r.success) out.brains = [...new Set(r.data)];
+  else out.problems.push(`${where}\`brains\` must be a list of: ${PROVIDER_IDS.join(', ')}.`);
+};
+
+const readIgnore: KeyReader = (value, out, where) => {
+  const r = ignoreSchema.safeParse(value);
+  if (r.success) out.ignore = r.data.map((g) => g.trim()).filter(Boolean);
+  else out.problems.push(`${where}\`ignore\` must be a list of path globs.`);
+};
+
+const READERS: Record<string, KeyReader> = {
+  brains: readBrains,
+  strictness: readStrictness,
+  ignore: readIgnore,
+};
+
+/** Reads every known key present in `values`; unknown keys are named when `warnUnknown`. */
+function readKeys(
+  values: Record<string, unknown>,
+  where: string,
+  warnUnknown: boolean,
+): SettingsSource {
+  const out = empty();
+  for (const [key, value] of Object.entries(values)) {
+    const read = READERS[key];
+    if (read) read(value, out, where);
+    else if (warnUnknown) out.problems.push(`Unknown key \`${key}\` was ignored.`);
+  }
+  return out;
+}
+
+/** The YAML text as a mapping, or what is wrong with it. */
+function parseMapping(text: string): { data?: Record<string, unknown>; problem?: string } {
   if (text.length > MAX_CONFIG_CHARS) {
-    return empty([
-      `\`${CONFIG_PATH}\` is larger than ${MAX_CONFIG_CHARS} characters and was ignored.`,
-    ]);
+    return {
+      problem: `\`${CONFIG_PATH}\` is larger than ${MAX_CONFIG_CHARS} characters and was ignored.`,
+    };
   }
   let data: unknown;
   try {
     data = parse(text);
   } catch (err) {
     const first = (err instanceof Error ? err.message : String(err)).split('\n')[0];
-    return empty([`\`${CONFIG_PATH}\` is not valid YAML (${first}); defaults were used.`]);
+    return { problem: `\`${CONFIG_PATH}\` is not valid YAML (${first}); defaults were used.` };
   }
-  if (data === null || data === undefined) return empty();
+  if (data === null || data === undefined) return {};
   if (typeof data !== 'object' || Array.isArray(data)) {
-    return empty([`\`${CONFIG_PATH}\` must be a mapping of keys; defaults were used.`]);
+    return { problem: `\`${CONFIG_PATH}\` must be a mapping of keys; defaults were used.` };
   }
-  const obj = data as Record<string, unknown>;
-  const out = empty();
-  for (const key of Object.keys(obj)) {
-    if (!KNOWN_KEYS.includes(key)) out.problems.push(`Unknown key \`${key}\` was ignored.`);
-  }
-  if ('strictness' in obj) {
-    const r = strictnessSchema.safeParse(obj.strictness);
-    if (r.success) out.strictness = r.data;
-    else out.problems.push(`\`strictness\` must be one of ${STRICTNESS_LEVELS.join(', ')}.`);
-  }
-  if ('brains' in obj) {
-    const r = brainsSchema.safeParse(obj.brains);
-    if (r.success) out.brains = [...new Set(r.data)];
-    else out.problems.push(`\`brains\` must be a list of: ${PROVIDER_IDS.join(', ')}.`);
-  }
-  if ('ignore' in obj) {
-    const r = ignoreSchema.safeParse(obj.ignore);
-    if (r.success) out.ignore = r.data.map((g) => g.trim()).filter(Boolean);
-    else out.problems.push('`ignore` must be a list of path globs.');
-  }
-  return out;
+  return { data: data as Record<string, unknown> };
+}
+
+/** Parses `.ezpr.yml`. A bad key is skipped and named; the other keys still apply. */
+export function parseConfigFile(text: string | null): SettingsSource {
+  if (text === null || !text.trim()) return empty();
+  const { data, problem } = parseMapping(text);
+  if (problem) return empty([problem]);
+  return data ? readKeys(data, '', true) : empty();
 }
 
 /** Reads the Action's own inputs the same way (`brains` is newline- or comma-separated). */
@@ -86,28 +114,11 @@ export function parseInputs(raw: {
   strictness: string;
   brains: string;
 }): SettingsSource {
-  const out = empty();
-  out.ignore = parseIgnore(raw.ignore);
-  const strictness = raw.strictness.trim();
-  if (strictness) {
-    const r = strictnessSchema.safeParse(strictness);
-    if (r.success) out.strictness = r.data;
-    else {
-      out.problems.push(
-        `Action input \`strictness\` must be one of ${STRICTNESS_LEVELS.join(', ')}.`,
-      );
-    }
-  }
-  const ids = raw.brains
-    .split(/[\s,]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (ids.length) {
-    const r = brainsSchema.safeParse(ids);
-    if (r.success) out.brains = [...new Set(r.data)];
-    else out.problems.push(`Action input \`brains\` must list only: ${PROVIDER_IDS.join(', ')}.`);
-  }
-  return out;
+  const brains = raw.brains.split(/[\s,]+/).filter(Boolean);
+  const set: Record<string, unknown> = { ignore: parseIgnore(raw.ignore) };
+  if (raw.strictness.trim()) set.strictness = raw.strictness.trim();
+  if (brains.length) set.brains = brains;
+  return readKeys(set, 'Action input ', false);
 }
 
 /** The Ignore list is the union; for the rest, the Action input wins over the Config file. */

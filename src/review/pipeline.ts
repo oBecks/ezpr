@@ -15,7 +15,8 @@ import type { Finding } from '../prompt/schema';
 import type { ChainFailure } from '../providers/chain';
 import type { Brain } from '../providers/types';
 import type { Publish } from '../render/publish';
-import { renderNothingToReview, renderReview, renderTooLarge } from '../render/summary';
+import { renderTooLarge, withConfigProblems } from '../render/notices';
+import { renderNothingToReview, renderReview } from '../render/summary';
 import { reviewInChunks, type ChunkedResult } from './chunks';
 import { postInlineFindings } from './inline';
 import type { Selection } from './select';
@@ -178,7 +179,10 @@ async function publishNothing(job: ReviewJob, prep: Prepared): Promise<void> {
   core.info('No reviewable files in this PR.');
   if (job.previous?.sha) return;
   const total = job.selection.files.length;
-  return publishStandalone(job, renderNothingToReview(prep, total, job.settings.problems));
+  return publishStandalone(
+    job,
+    withConfigProblems(renderNothingToReview(prep, total), job.settings.problems),
+  );
 }
 
 /** Publishes a Summary that is not a Review of the diff (nothing reviewed, or too large). */
@@ -206,7 +210,7 @@ export async function reviewPr(job: ReviewJob): Promise<void> {
       tokens: setup.prep.candidates.reduce((n, f) => n + diffCost(f), 0),
       budget: setup.primary.maxInputTokens - estimateTokens(setup.system),
     };
-    return publishStandalone(job, renderTooLarge(size, job.settings.problems));
+    return publishStandalone(job, withConfigProblems(renderTooLarge(size), job.settings.problems));
   }
   logContext(setup, done, Boolean(root));
   logFailures(done.failures);

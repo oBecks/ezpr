@@ -52374,7 +52374,6 @@ function makeIgnore(patterns) {
 // src/context/settings.ts
 var MAX_CONFIG_CHARS = 2e4;
 var CONFIG_PATH = ".ezpr.yml";
-var KNOWN_KEYS = ["brains", "strictness", "ignore"];
 var PROVIDER_IDS = [...PROVIDER_ORDER.map((p) => p.id), "custom"];
 var strictnessSchema = external_exports.enum(STRICTNESS_LEVELS);
 var brainsSchema = external_exports.array(
@@ -52382,66 +52381,66 @@ var brainsSchema = external_exports.array(
 ).min(1);
 var ignoreSchema = external_exports.array(external_exports.string());
 var empty = (problems = []) => ({ ignore: [], problems });
-function parseConfigFile(text) {
-  if (text === null || !text.trim()) return empty();
+var readStrictness = (value, out, where) => {
+  const r = strictnessSchema.safeParse(value);
+  if (r.success) out.strictness = r.data;
+  else out.problems.push(`${where}\`strictness\` must be one of ${STRICTNESS_LEVELS.join(", ")}.`);
+};
+var readBrains = (value, out, where) => {
+  const r = brainsSchema.safeParse(value);
+  if (r.success) out.brains = [...new Set(r.data)];
+  else out.problems.push(`${where}\`brains\` must be a list of: ${PROVIDER_IDS.join(", ")}.`);
+};
+var readIgnore = (value, out, where) => {
+  const r = ignoreSchema.safeParse(value);
+  if (r.success) out.ignore = r.data.map((g) => g.trim()).filter(Boolean);
+  else out.problems.push(`${where}\`ignore\` must be a list of path globs.`);
+};
+var READERS = {
+  brains: readBrains,
+  strictness: readStrictness,
+  ignore: readIgnore
+};
+function readKeys(values, where, warnUnknown) {
+  const out = empty();
+  for (const [key, value] of Object.entries(values)) {
+    const read2 = READERS[key];
+    if (read2) read2(value, out, where);
+    else if (warnUnknown) out.problems.push(`Unknown key \`${key}\` was ignored.`);
+  }
+  return out;
+}
+function parseMapping(text) {
   if (text.length > MAX_CONFIG_CHARS) {
-    return empty([
-      `\`${CONFIG_PATH}\` is larger than ${MAX_CONFIG_CHARS} characters and was ignored.`
-    ]);
+    return {
+      problem: `\`${CONFIG_PATH}\` is larger than ${MAX_CONFIG_CHARS} characters and was ignored.`
+    };
   }
   let data;
   try {
     data = (0, import_yaml.parse)(text);
   } catch (err) {
     const first = (err instanceof Error ? err.message : String(err)).split("\n")[0];
-    return empty([`\`${CONFIG_PATH}\` is not valid YAML (${first}); defaults were used.`]);
+    return { problem: `\`${CONFIG_PATH}\` is not valid YAML (${first}); defaults were used.` };
   }
-  if (data === null || data === void 0) return empty();
+  if (data === null || data === void 0) return {};
   if (typeof data !== "object" || Array.isArray(data)) {
-    return empty([`\`${CONFIG_PATH}\` must be a mapping of keys; defaults were used.`]);
+    return { problem: `\`${CONFIG_PATH}\` must be a mapping of keys; defaults were used.` };
   }
-  const obj = data;
-  const out = empty();
-  for (const key of Object.keys(obj)) {
-    if (!KNOWN_KEYS.includes(key)) out.problems.push(`Unknown key \`${key}\` was ignored.`);
-  }
-  if ("strictness" in obj) {
-    const r = strictnessSchema.safeParse(obj.strictness);
-    if (r.success) out.strictness = r.data;
-    else out.problems.push(`\`strictness\` must be one of ${STRICTNESS_LEVELS.join(", ")}.`);
-  }
-  if ("brains" in obj) {
-    const r = brainsSchema.safeParse(obj.brains);
-    if (r.success) out.brains = [...new Set(r.data)];
-    else out.problems.push(`\`brains\` must be a list of: ${PROVIDER_IDS.join(", ")}.`);
-  }
-  if ("ignore" in obj) {
-    const r = ignoreSchema.safeParse(obj.ignore);
-    if (r.success) out.ignore = r.data.map((g) => g.trim()).filter(Boolean);
-    else out.problems.push("`ignore` must be a list of path globs.");
-  }
-  return out;
+  return { data };
+}
+function parseConfigFile(text) {
+  if (text === null || !text.trim()) return empty();
+  const { data, problem } = parseMapping(text);
+  if (problem) return empty([problem]);
+  return data ? readKeys(data, "", true) : empty();
 }
 function parseInputs(raw) {
-  const out = empty();
-  out.ignore = parseIgnore(raw.ignore);
-  const strictness = raw.strictness.trim();
-  if (strictness) {
-    const r = strictnessSchema.safeParse(strictness);
-    if (r.success) out.strictness = r.data;
-    else {
-      out.problems.push(
-        `Action input \`strictness\` must be one of ${STRICTNESS_LEVELS.join(", ")}.`
-      );
-    }
-  }
-  const ids = raw.brains.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-  if (ids.length) {
-    const r = brainsSchema.safeParse(ids);
-    if (r.success) out.brains = [...new Set(r.data)];
-    else out.problems.push(`Action input \`brains\` must list only: ${PROVIDER_IDS.join(", ")}.`);
-  }
-  return out;
+  const brains = raw.brains.split(/[\s,]+/).filter(Boolean);
+  const set2 = { ignore: parseIgnore(raw.ignore) };
+  if (raw.strictness.trim()) set2.strictness = raw.strictness.trim();
+  if (brains.length) set2.brains = brains;
+  return readKeys(set2, "Action input ", false);
 }
 function mergeSettings(file2, input2) {
   return {
@@ -90152,6 +90151,64 @@ async function runChain(brains, run2, opts = {}) {
 // src/review/types.ts
 var errorText = (err) => err instanceof Error ? err.message : String(err);
 
+// src/render/notices.ts
+var SIZE_TIPS = "Try splitting the PR into smaller ones, or add generated or vendored paths to `ignore` (in `.ezpr.yml` or the action input).";
+function renderConfigProblems(problems = []) {
+  if (!problems.length) return [];
+  return ["> \u26A0\uFE0F Config problems:", ...problems.map((p) => `> - ${p}`), ""];
+}
+function withConfigProblems(content, problems) {
+  return [content, "", ...renderConfigProblems(problems)].join("\n").trimEnd();
+}
+function renderTooLarge(size) {
+  return [
+    "## EzPR review",
+    "",
+    `This PR is too large to review: ${size.files} changed file(s), about ${size.tokens.toLocaleString("en-US")} tokens of diff, and no model call can take more than about ${size.budget.toLocaleString("en-US")}. Nothing was sent to a model.`,
+    "",
+    SIZE_TIPS
+  ].join("\n").trimEnd();
+}
+function renderFailureAdvice(failures) {
+  const seen = /* @__PURE__ */ new Set();
+  const lines = [];
+  for (const f of failures) {
+    const key = `${f.brain}:${f.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`- \`${f.brain}\` ${describeFailure(f.kind)}. ${adviceFor(f.kind)}`);
+  }
+  return lines;
+}
+function renderErrorComment(message, failures = []) {
+  return [
+    SUMMARY_MARKER,
+    "## EzPR could not complete the review",
+    "",
+    ...failures.length ? ["Every model failed:", "", ...renderFailureAdvice(failures)] : [message],
+    "",
+    "The job log has details. Re-push or re-run the workflow to try again."
+  ].join("\n");
+}
+
+// src/render/publish.ts
+function makePublisher(gh) {
+  return async (body) => {
+    if (!gh.pr.isFork) {
+      await upsertSummary(gh.octokit, gh.repo, gh.pr.number, body);
+      return;
+    }
+    await summary.addRaw(body).write();
+    info("Fork PR: wrote review to the job summary instead of commenting.");
+  };
+}
+async function publishFailure(publish, err, keepReview = false) {
+  error(errorText(err));
+  if (keepReview) return;
+  const failures = err instanceof ChainError ? err.failures : [];
+  await publish(renderErrorComment(errorText(err), failures));
+}
+
 // src/render/summary.ts
 var ICON2 = { critical: "\u{1F534}", high: "\u{1F7E0}", medium: "\u{1F7E1}", low: "\u{1F535}" };
 var MAX_LISTED = 10;
@@ -90159,11 +90216,6 @@ function paths(list) {
   const shown = list.slice(0, MAX_LISTED).map((p) => `\`${p}\``);
   const more = list.length - shown.length;
   return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
-}
-var SIZE_TIPS = "Try splitting the PR into smaller ones, or add generated or vendored paths to `ignore` (in `.ezpr.yml` or the action input).";
-function renderConfigProblems(problems = []) {
-  if (!problems.length) return [];
-  return ["> \u26A0\uFE0F Config problems:", ...problems.map((p) => `> - ${p}`), ""];
 }
 function renderReview(review, brainId, ctx, failures = [], opts = {}) {
   const lines = ["## EzPR review", ""];
@@ -90240,7 +90292,7 @@ function renderFailures(failures, used = []) {
   if (partial2.length) out.push(`Failed on some parts: ${partial2.map(text).join("; ")}.`);
   return out.join(" ");
 }
-function renderNothingToReview(prep, total, configProblems = []) {
+function renderNothingToReview(prep, total) {
   const lines = [
     "## EzPR review",
     "",
@@ -90261,19 +90313,7 @@ function renderNothingToReview(prep, total, configProblems = []) {
   if (prep.skippedNoise.length) {
     lines.push(`- Generated, binary or lock files: ${paths(prep.skippedNoise)}`);
   }
-  lines.push("", ...renderConfigProblems(configProblems));
-  return lines.join("\n").trimEnd();
-}
-function renderTooLarge(size, configProblems = []) {
-  return [
-    "## EzPR review",
-    "",
-    `This PR is too large to review: ${size.files} changed file(s), about ${size.tokens.toLocaleString("en-US")} tokens of diff, and no model call can take more than about ${size.budget.toLocaleString("en-US")}. Nothing was sent to a model.`,
-    "",
-    SIZE_TIPS,
-    "",
-    ...renderConfigProblems(configProblems)
-  ].join("\n").trimEnd();
+  return lines.join("\n");
 }
 function renderSetupComment() {
   return [
@@ -90292,45 +90332,6 @@ function renderSetupComment() {
     "    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}",
     "```"
   ].join("\n");
-}
-function renderFailureAdvice(failures) {
-  const seen = /* @__PURE__ */ new Set();
-  const lines = [];
-  for (const f of failures) {
-    const key = `${f.brain}:${f.kind}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    lines.push(`- \`${f.brain}\` ${describeFailure(f.kind)}. ${adviceFor(f.kind)}`);
-  }
-  return lines;
-}
-function renderErrorComment(message, failures = []) {
-  return [
-    SUMMARY_MARKER,
-    "## EzPR could not complete the review",
-    "",
-    ...failures.length ? ["Every model failed:", "", ...renderFailureAdvice(failures)] : [message],
-    "",
-    "The job log has details. Re-push or re-run the workflow to try again."
-  ].join("\n");
-}
-
-// src/render/publish.ts
-function makePublisher(gh) {
-  return async (body) => {
-    if (!gh.pr.isFork) {
-      await upsertSummary(gh.octokit, gh.repo, gh.pr.number, body);
-      return;
-    }
-    await summary.addRaw(body).write();
-    info("Fork PR: wrote review to the job summary instead of commenting.");
-  };
-}
-async function publishFailure(publish, err, keepReview = false) {
-  error(errorText(err));
-  if (keepReview) return;
-  const failures = err instanceof ChainError ? err.failures : [];
-  await publish(renderErrorComment(errorText(err), failures));
 }
 
 // src/context/budget.ts
@@ -91134,7 +91135,10 @@ async function publishNothing(job, prep) {
   info("No reviewable files in this PR.");
   if (job.previous?.sha) return;
   const total = job.selection.files.length;
-  return publishStandalone(job, renderNothingToReview(prep, total, job.settings.problems));
+  return publishStandalone(
+    job,
+    withConfigProblems(renderNothingToReview(prep, total), job.settings.problems)
+  );
 }
 async function publishStandalone(job, content) {
   if (job.gh.pr.isFork) return job.publish(content);
@@ -91157,7 +91161,7 @@ async function reviewPr(job) {
       tokens: setup.prep.candidates.reduce((n, f) => n + diffCost(f), 0),
       budget: setup.primary.maxInputTokens - estimateTokens(setup.system)
     };
-    return publishStandalone(job, renderTooLarge(size, job.settings.problems));
+    return publishStandalone(job, withConfigProblems(renderTooLarge(size), job.settings.problems));
   }
   logContext(setup, done, Boolean(root));
   logFailures(done.failures);

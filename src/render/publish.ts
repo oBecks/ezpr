@@ -3,7 +3,7 @@ import { upsertSummary } from '../github/comments';
 import { ChainError } from '../providers/chain';
 import type { Gh } from '../review/types';
 import { errorText } from '../review/types';
-import { renderErrorComment } from './summary';
+import { renderErrorComment } from './notices';
 
 export type Publish = (body: string) => Promise<void>;
 

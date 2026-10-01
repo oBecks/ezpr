@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Context } from '../src/context/collect';
-import {
-  renderErrorComment,
-  renderFailures,
-  renderNothingToReview,
-  renderReview,
-  renderTooLarge,
-} from '../src/render/summary';
+import { renderErrorComment, renderTooLarge, withConfigProblems } from '../src/render/notices';
+import { renderFailures, renderNothingToReview, renderReview } from '../src/render/summary';
 
 const file = (path: string) => ({ path, status: 'modified', patch: '+x' });
 const ctx = (over: Partial<Context> = {}): Context => ({
@@ -112,7 +107,9 @@ describe('Phase 5 comments', () => {
   });
 
   it('explains a too-large PR with counts and tips', () => {
-    const text = renderTooLarge({ files: 3, tokens: 250_000, budget: 98_000 }, ['bad key']);
+    const text = withConfigProblems(renderTooLarge({ files: 3, tokens: 250_000, budget: 98_000 }), [
+      'bad key',
+    ]);
     expect(text).toContain('too large to review: 3 changed file(s)');
     expect(text).toContain('250,000');
     expect(text).toContain('98,000');
@@ -127,7 +124,7 @@ describe('Phase 5 comments', () => {
       skippedIgnored: [],
       missingPatch: [],
     };
-    expect(renderNothingToReview(prep, 1, ['bad key'])).toContain('bad key');
+    expect(withConfigProblems(renderNothingToReview(prep, 1), ['bad key'])).toContain('bad key');
   });
 
   it('names each failed Brain once with advice when every model failed', () => {
