@@ -9,7 +9,7 @@ change, and falls back between model providers when one is rate-limited.
 The quickest way, from your repository:
 
 ```bash
-npx @obecks/ezpr init
+npx @obeck/ezpr init
 ```
 
 It writes the workflow below, opens the page where you create an API key, and saves the key as

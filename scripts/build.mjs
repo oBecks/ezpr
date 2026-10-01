@@ -11,7 +11,7 @@ await build({
   legalComments: 'none',
 });
 
-// The CLI (`npx @obecks/ezpr`), built on publish only; see "prepublishOnly".
+// The CLI (`npx @obeck/ezpr`), built on publish only; see "prepublishOnly".
 await build({
   entryPoints: ['src/cli/main.ts'],
   outfile: 'cli/ezpr.cjs',

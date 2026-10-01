@@ -8,7 +8,7 @@ import { runInit, type InitIo } from './init';
 const HELP = `ezpr - set up the EzPR pull request reviewer
 
 Usage:
-  npx @obecks/ezpr init [--force] [--repo owner/name] [--no-open] [--ref v1]
+  npx @obeck/ezpr init [--force] [--repo owner/name] [--no-open] [--ref v1]
 
 init writes .github/workflows/ai-review.yml, opens the page where you create an API key,
 and saves the key as a repository secret with the GitHub CLI (gh).
