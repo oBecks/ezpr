@@ -74,22 +74,23 @@ function declsFor(file: string): RegExp[] {
   return DECLS.other;
 }
 
+/** A line a patch adds or removes (not the `+++`/`---` file headers). */
+const isChangedLine = (line: string): boolean => /^(?:\+(?!\+\+)|-(?!--))/.test(line);
+
+const searchable = (name: string | undefined): name is string =>
+  name !== undefined && name.length >= MIN_LENGTH && !COMMON.has(name);
+
 /**
  * Names of functions, classes and similar declarations that a patch adds, changes or
  * removes. Regex based and deliberately approximate: it errs towards fewer, longer names.
  */
 export function changedSymbols(file: string, patch: string): string[] {
   const res = declsFor(file);
-  const seen = new Set<string>();
-  for (const line of patch.split('\n')) {
-    if (!/^[+-]/.test(line) || /^(\+\+\+|---)/.test(line)) continue;
-    const text = line.slice(1);
-    for (const re of res) {
-      const name = re.exec(text)?.[1];
-      if (name && name.length >= MIN_LENGTH && !COMMON.has(name)) seen.add(name);
-    }
-  }
-  return [...seen];
+  const names = patch
+    .split('\n')
+    .filter(isChangedLine)
+    .flatMap((line) => res.map((re) => re.exec(line.slice(1))?.[1]));
+  return [...new Set(names.filter(searchable))];
 }
 
 /** Symbols across several patches, capped so the caller search stays cheap. */

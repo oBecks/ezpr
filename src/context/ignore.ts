@@ -6,29 +6,18 @@ export function parseIgnore(input: string): string[] {
     .filter((l) => l && !l.startsWith('#'));
 }
 
+const GLOB_TOKENS: Record<string, string> = {
+  '**/': '(?:.*/)?',
+  '**': '.*',
+  '*': '[^/]*',
+  '?': '[^/]',
+};
+
 function globToSource(glob: string): string {
-  let out = '';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob.charAt(i);
-    if (c === '*') {
-      if (glob.charAt(i + 1) === '*') {
-        i++;
-        if (glob.charAt(i + 1) === '/') {
-          i++;
-          out += '(?:.*/)?';
-        } else {
-          out += '.*';
-        }
-      } else {
-        out += '[^/]*';
-      }
-    } else if (c === '?') {
-      out += '[^/]';
-    } else {
-      out += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-    }
-  }
-  return out;
+  return glob.replace(
+    /\*\*\/|\*\*|\*|\?|[.+^${}()|[\]\\]/g,
+    (token) => GLOB_TOKENS[token] ?? `\\${token}`,
+  );
 }
 
 /**

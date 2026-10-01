@@ -25389,29 +25389,17 @@ function buildContext(prepared, files, budgetTokens, extras = {}) {
 function parseIgnore(input2) {
   return input2.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
 }
+var GLOB_TOKENS = {
+  "**/": "(?:.*/)?",
+  "**": ".*",
+  "*": "[^/]*",
+  "?": "[^/]"
+};
 function globToSource(glob) {
-  let out = "";
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob.charAt(i);
-    if (c === "*") {
-      if (glob.charAt(i + 1) === "*") {
-        i++;
-        if (glob.charAt(i + 1) === "/") {
-          i++;
-          out += "(?:.*/)?";
-        } else {
-          out += ".*";
-        }
-      } else {
-        out += "[^/]*";
-      }
-    } else if (c === "?") {
-      out += "[^/]";
-    } else {
-      out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  return out;
+  return glob.replace(
+    /\*\*\/|\*\*|\*|\?|[.+^${}()|[\]\\]/g,
+    (token) => GLOB_TOKENS[token] ?? `\\${token}`
+  );
 }
 function makeIgnore(patterns) {
   const res = patterns.map((raw) => {
@@ -25435,57 +25423,63 @@ var MAX_FILE_CHARS2 = 2e5;
 function escape(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+function snippetAt(lines, index, context3) {
+  const from = Math.max(0, index - context3);
+  const to = Math.min(lines.length, index + context3 + 1);
+  return lines.slice(from, to).map((l, k) => `${from + k + 1}: ${l}`).join("\n");
+}
+function matchFile(path, text, s, room) {
+  const lines = text.split("\n");
+  const out = [];
+  let lastHit = -Infinity;
+  for (let i = 0; i < lines.length && out.length < room; i++) {
+    const symbol6 = s.re.exec(lines[i] ?? "")?.[1];
+    if (!symbol6 || i - lastHit <= s.context) continue;
+    const seen = s.counts.get(symbol6) ?? 0;
+    if (seen >= s.maxPerSymbol) continue;
+    s.counts.set(symbol6, seen + 1);
+    lastHit = i;
+    out.push({ path, line: i + 1, symbol: symbol6, snippet: redact(snippetAt(lines, i, s.context)) });
+  }
+  return out;
+}
+var searchableFile = (path, opts) => skipReason(path) === null && !opts.ignored(path) && !opts.exclude.has(path);
+var searchableDir = (path, opts) => skipReason(`${path}/`) === null && !opts.ignored(path);
+async function* walk(root, opts) {
+  const stack = [""];
+  while (stack.length > 0) {
+    const rel = stack.pop() ?? "";
+    const entries = await (0, import_promises.readdir)(nodePath.join(root, rel), { withFileTypes: true }).catch(
+      () => []
+    );
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    const at = (name5) => rel ? `${rel}/${name5}` : name5;
+    const real = entries.filter((e) => !e.isSymbolicLink());
+    const dirs = real.filter((e) => e.isDirectory()).map((e) => at(e.name));
+    yield* real.filter((e) => e.isFile()).map((e) => at(e.name));
+    stack.push(...dirs.filter((d) => searchableDir(d, opts)).reverse());
+  }
+}
+async function readText(root, path) {
+  const text = await (0, import_promises.readFile)(nodePath.join(root, path), "utf8").catch(() => null);
+  return text === null || text.length > MAX_FILE_CHARS2 || text.includes("\0") ? null : text;
+}
 async function findCallers(root, symbols, opts) {
   if (symbols.length === 0) return [];
   const { maxPerSymbol = 5, maxTotal = 20, maxFiles = 5e3, context: context3 = 5 } = opts;
-  const re = new RegExp(`(?<![\\w$])(${symbols.map(escape).join("|")})(?![\\w$])`);
-  const counts = /* @__PURE__ */ new Map();
+  const search = {
+    re: new RegExp(`(?<![\\w$])(${symbols.map(escape).join("|")})(?![\\w$])`),
+    counts: /* @__PURE__ */ new Map(),
+    maxPerSymbol,
+    context: context3
+  };
   const hits = [];
   let scanned = 0;
-  const stack = [""];
-  while (stack.length > 0 && hits.length < maxTotal && scanned < maxFiles) {
-    const rel = stack.pop() ?? "";
-    let entries;
-    try {
-      entries = await (0, import_promises.readdir)(nodePath.join(root, rel), { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    const dirs = [];
-    for (const e of entries) {
-      if (hits.length >= maxTotal || scanned >= maxFiles) break;
-      if (e.isSymbolicLink()) continue;
-      const p = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        if (skipReason(`${p}/`) === null && !opts.ignored(p)) dirs.push(p);
-        continue;
-      }
-      if (!e.isFile() || skipReason(p) !== null || opts.ignored(p) || opts.exclude.has(p)) continue;
-      scanned++;
-      let text;
-      try {
-        text = await (0, import_promises.readFile)(nodePath.join(root, p), "utf8");
-      } catch {
-        continue;
-      }
-      if (text.length > MAX_FILE_CHARS2 || text.includes("\0")) continue;
-      const lines = text.split("\n");
-      let lastHit = -Infinity;
-      for (let i = 0; i < lines.length; i++) {
-        const symbol6 = re.exec(lines[i] ?? "")?.[1];
-        if (!symbol6 || i - lastHit <= context3) continue;
-        if ((counts.get(symbol6) ?? 0) >= maxPerSymbol) continue;
-        counts.set(symbol6, (counts.get(symbol6) ?? 0) + 1);
-        lastHit = i;
-        const from = Math.max(0, i - context3);
-        const to = Math.min(lines.length, i + context3 + 1);
-        const snippet = lines.slice(from, to).map((l, k) => `${from + k + 1}: ${l}`).join("\n");
-        hits.push({ path: p, line: i + 1, symbol: symbol6, snippet: redact(snippet) });
-        if (hits.length >= maxTotal) break;
-      }
-    }
-    stack.push(...dirs.reverse());
+  for await (const path of walk(root, opts)) {
+    if (!searchableFile(path, opts)) continue;
+    const text = await readText(root, path);
+    if (text !== null) hits.push(...matchFile(path, text, search, maxTotal - hits.length));
+    if (hits.length >= maxTotal || ++scanned >= maxFiles) break;
   }
   return hits;
 }
@@ -25497,13 +25491,7 @@ var MAX_IMPORT_CHARS = 5e4;
 var MAX_IMPORTS_PER_FILE = 10;
 var JS_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
 var C_EXTS = [".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx"];
-function langOf(file2) {
-  const ext = posix2.extname(file2).toLowerCase();
-  if (JS_EXTS.includes(ext)) return "js";
-  if (ext === ".py") return "py";
-  if (C_EXTS.includes(ext)) return "c";
-  return "other";
-}
+var specifiers = (re, content) => [...content.matchAll(re)].map((m) => m[1] ?? "");
 function jsAlternatives(base) {
   const ext = posix2.extname(base);
   if (JS_EXTS.includes(ext)) {
@@ -25512,77 +25500,80 @@ function jsAlternatives(base) {
   }
   return [...JS_EXTS.map((e) => base + e), ...JS_EXTS.map((e) => `${base}/index${e}`)];
 }
-function pyAlternatives(base) {
-  return [`${base}.py`, `${base}/__init__.py`];
+var pyAlternatives = (base) => [`${base}.py`, `${base}/__init__.py`];
+var jsImports = (file2, content) => {
+  const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](\.{1,2}(?:\/[^'"]*)?)['"]/g;
+  return specifiers(re, content).map(
+    (spec) => jsAlternatives(posix2.join(posix2.dirname(file2), spec))
+  );
+};
+var pyAbsolute = (file2, mod) => [mod, posix2.join(posix2.dirname(file2), mod), `src/${mod}`].flatMap(pyAlternatives);
+function pyRelative(file2, dots, mod, names) {
+  let base = posix2.dirname(file2);
+  for (let i = 1; i < dots.length; i++) base = posix2.dirname(base);
+  if (mod) return [pyAlternatives(posix2.join(base, mod))];
+  const listed = names.split(",").map((n) => n.trim().split(/\s+/)[0] ?? "");
+  return listed.filter(Boolean).map((n) => pyAlternatives(posix2.join(base, n)));
+}
+var pyFrom = (file2, content) => {
+  const re = /^[ \t]*from[ \t]+(\.*)([\w.]*)[ \t]+import[ \t]+([\w, ]+)/gm;
+  return [...content.matchAll(re)].flatMap((m) => {
+    const [dots = "", rawMod = "", names = ""] = [m[1], m[2], m[3]];
+    const mod = rawMod.replace(/\./g, "/");
+    if (dots) return pyRelative(file2, dots, mod, names);
+    return mod ? [pyAbsolute(file2, mod)] : [];
+  });
+};
+var pyPlain = (file2, content) => specifiers(/^[ \t]*import[ \t]+([\w., ]+)/gm, content).flatMap((list) => list.split(",")).map((n) => (n.trim().split(/\s+/)[0] ?? "").replace(/\./g, "/")).filter(Boolean).map((mod) => pyAbsolute(file2, mod));
+var pyImports = (file2, content) => [
+  ...pyFrom(file2, content),
+  ...pyPlain(file2, content)
+];
+var cImports = (file2, content) => specifiers(/^[ \t]*#[ \t]*include[ \t]+"([^"]+)"/gm, content).map((spec) => [
+  posix2.join(posix2.dirname(file2), spec),
+  spec,
+  `include/${spec}`
+]);
+var otherImports = (file2, content) => {
+  const re = /\b(?:import|require|include|use|from|source)\b[^\n'"]*['"](\.{1,2}\/[^'"]+)['"]/g;
+  return specifiers(re, content).map((spec) => {
+    const target = posix2.join(posix2.dirname(file2), spec);
+    return [target, target + posix2.extname(file2)];
+  });
+};
+function extractorFor(file2) {
+  const ext = posix2.extname(file2).toLowerCase();
+  if (JS_EXTS.includes(ext)) return jsImports;
+  if (ext === ".py") return pyImports;
+  if (C_EXTS.includes(ext)) return cImports;
+  return otherImports;
 }
 function importCandidates(file2, content) {
-  const dir = posix2.dirname(file2);
-  const out = [];
-  const lang = langOf(file2);
-  if (lang === "js") {
-    const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](\.{1,2}(?:\/[^'"]*)?)['"]/g;
-    for (const m of content.matchAll(re)) {
-      out.push(jsAlternatives(posix2.join(dir, m[1] ?? "")));
-    }
-  } else if (lang === "py") {
-    const absolute = (mod) => [mod, posix2.join(dir, mod), `src/${mod}`].flatMap(pyAlternatives);
-    for (const m of content.matchAll(
-      /^[ \t]*from[ \t]+(\.*)([\w.]*)[ \t]+import[ \t]+([\w, ]+)/gm
-    )) {
-      const dots = m[1] ?? "";
-      const mod = (m[2] ?? "").replace(/\./g, "/");
-      if (dots) {
-        let base = dir;
-        for (let i = 1; i < dots.length; i++) base = posix2.dirname(base);
-        if (mod) {
-          out.push(pyAlternatives(posix2.join(base, mod)));
-        } else {
-          for (const n of (m[3] ?? "").split(",")) {
-            const name5 = n.trim().split(/\s+/)[0];
-            if (name5) out.push(pyAlternatives(posix2.join(base, name5)));
-          }
-        }
-      } else if (mod) {
-        out.push(absolute(mod));
-      }
-    }
-    for (const m of content.matchAll(/^[ \t]*import[ \t]+([\w., ]+)/gm)) {
-      for (const n of (m[1] ?? "").split(",")) {
-        const mod = (n.trim().split(/\s+/)[0] ?? "").replace(/\./g, "/");
-        if (mod) out.push(absolute(mod));
-      }
-    }
-  } else if (lang === "c") {
-    for (const m of content.matchAll(/^[ \t]*#[ \t]*include[ \t]+"([^"]+)"/gm)) {
-      const spec = m[1] ?? "";
-      out.push([posix2.join(dir, spec), spec, `include/${spec}`]);
-    }
-  } else {
-    const ext = posix2.extname(file2);
-    const re = /\b(?:import|require|include|use|from|source)\b[^\n'"]*['"](\.{1,2}\/[^'"]+)['"]/g;
-    for (const m of content.matchAll(re)) {
-      const target = posix2.join(dir, m[1] ?? "");
-      out.push([target, target + ext]);
-    }
+  return extractorFor(file2)(file2, content);
+}
+function localPath(raw, file2) {
+  const p = posix2.normalize(raw);
+  return p.startsWith("..") || posix2.isAbsolute(p) || p === file2 ? null : p;
+}
+var mayRead = (p, opts) => skipReason(p) === null && !opts.ignored(p);
+async function resolveOne(file2, alternatives, read2, opts) {
+  for (const raw of alternatives) {
+    const p = localPath(raw, file2);
+    if (p === null) continue;
+    if (opts.exclude.has(p)) return null;
+    if (!mayRead(p, opts)) continue;
+    const text = await read2(p);
+    if (text === null) continue;
+    return text.length <= MAX_IMPORT_CHARS ? { path: p, importedBy: file2, content: redact(text) } : null;
   }
-  return out;
+  return null;
 }
 async function resolveImports(file2, content, read2, opts) {
   const found = [];
-  for (const alts of importCandidates(file2, content)) {
+  for (const alternatives of importCandidates(file2, content)) {
     if (found.length >= MAX_IMPORTS_PER_FILE) break;
-    for (const raw of alts) {
-      const p = posix2.normalize(raw);
-      if (p.startsWith("..") || posix2.isAbsolute(p) || p === file2) continue;
-      if (opts.exclude.has(p)) break;
-      if (skipReason(p) !== null || opts.ignored(p)) continue;
-      const text = await read2(p);
-      if (text === null) continue;
-      if (text.length <= MAX_IMPORT_CHARS) {
-        found.push({ path: p, importedBy: file2, content: redact(text) });
-      }
-      break;
-    }
+    const hit = await resolveOne(file2, alternatives, read2, opts);
+    if (hit) found.push(hit);
   }
   return found;
 }
@@ -25657,18 +25648,12 @@ function declsFor(file2) {
   if (C_EXTS2.includes(ext)) return DECLS.c;
   return DECLS.other;
 }
+var isChangedLine = (line) => /^(?:\+(?!\+\+)|-(?!--))/.test(line);
+var searchable = (name5) => name5 !== void 0 && name5.length >= MIN_LENGTH && !COMMON.has(name5);
 function changedSymbols(file2, patch) {
   const res = declsFor(file2);
-  const seen = /* @__PURE__ */ new Set();
-  for (const line of patch.split("\n")) {
-    if (!/^[+-]/.test(line) || /^(\+\+\+|---)/.test(line)) continue;
-    const text = line.slice(1);
-    for (const re of res) {
-      const name5 = re.exec(text)?.[1];
-      if (name5 && name5.length >= MIN_LENGTH && !COMMON.has(name5)) seen.add(name5);
-    }
-  }
-  return [...seen];
+  const names = patch.split("\n").filter(isChangedLine).flatMap((line) => res.map((re) => re.exec(line.slice(1))?.[1]));
+  return [...new Set(names.filter(searchable))];
 }
 function symbolsOf(files) {
   const all = /* @__PURE__ */ new Set();
@@ -25693,28 +25678,24 @@ function checkoutReader(root) {
     }
   };
 }
+async function gatherImports(chunk, opts) {
+  const withContent = chunk.filter((f) => f.content !== void 0);
+  const lists = await Promise.all(
+    withContent.map(
+      (f) => resolveImports(f.path, f.content ?? "", opts.read, {
+        exclude: opts.changed,
+        ignored: opts.ignored
+      })
+    )
+  );
+  return lists.flat().filter((i, n, all) => all.findIndex((j) => j.path === i.path) === n);
+}
 async function gatherExtras(chunk, opts) {
-  const imports = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const f of chunk) {
-    if (f.content === void 0) continue;
-    const found = await resolveImports(f.path, f.content, opts.read, {
-      exclude: opts.changed,
-      ignored: opts.ignored
-    });
-    for (const i of found) {
-      if (seen.has(i.path)) continue;
-      seen.add(i.path);
-      imports.push(i);
-    }
-  }
-  let callers = [];
-  if (opts.root) {
-    callers = await findCallers(opts.root, symbolsOf(chunk), {
-      exclude: opts.changed,
-      ignored: opts.ignored
-    });
-  }
+  const imports = await gatherImports(chunk, opts);
+  const callers = opts.root ? await findCallers(opts.root, symbolsOf(chunk), {
+    exclude: opts.changed,
+    ignored: opts.ignored
+  }) : [];
   return { imports, callers };
 }
 
@@ -26002,8 +25983,42 @@ The repository owner's review guidance (REVIEW.md):
 ${rules}` : SYSTEM_PROMPT;
 }
 var defang = (text) => text.replaceAll("</pr_data>", "<\\/pr_data>");
-function buildPrompt(meta3, ctx) {
-  const parts = ["<pr_data>", `<title>${meta3.title}</title>`];
+function fileBlock(f) {
+  const parts = [`<file path="${f.path}" status="${f.status}">`, `<diff>
+${f.patch}
+</diff>`];
+  if (f.content !== void 0) {
+    const numbered = f.content.split("\n").map((l, i) => `${i + 1}: ${l}`).join("\n");
+    parts.push(`<full_file>
+${numbered}
+</full_file>`);
+  }
+  parts.push("</file>");
+  return parts;
+}
+function backgroundBlocks(ctx) {
+  if (!ctx.imports.length && !ctx.callers.length) return [];
+  return [
+    "<note>The imported_file and caller_snippet blocks are background only, from files this PR did not change. Do not report findings on them; use them to judge the changed code.</note>",
+    ...ctx.imports.map(
+      (i) => `<imported_file path="${i.path}" imported_by="${i.importedBy}">
+${defang(i.content)}
+</imported_file>`
+    ),
+    ...ctx.callers.map(
+      (c) => `<caller_snippet path="${c.path}" symbol="${c.symbol}">
+${defang(c.snippet)}
+</caller_snippet>`
+    )
+  ];
+}
+function omittedNote(ctx) {
+  const omitted = [...ctx.droppedDiffs, ...ctx.droppedContents, ...ctx.droppedImports];
+  if (ctx.droppedCallers) omitted.push(`${ctx.droppedCallers} caller snippet(s)`);
+  return omitted.length ? [`<note>Some context was omitted to fit limits: ${omitted.join(", ")}</note>`] : [];
+}
+function headerBlocks(meta3) {
+  const parts = [`<title>${meta3.title}</title>`];
   if (meta3.since) {
     parts.push(
       `<note>Incremental review: only changes since commit ${meta3.since} are shown. Earlier code was already reviewed.</note>`
@@ -26012,49 +26027,17 @@ function buildPrompt(meta3, ctx) {
   if (meta3.body.trim()) parts.push(`<description>
 ${meta3.body}
 </description>`);
-  for (const f of ctx.files) {
-    parts.push(`<file path="${f.path}" status="${f.status}">`);
-    parts.push(`<diff>
-${f.patch}
-</diff>`);
-    if (f.content !== void 0) {
-      const numbered = f.content.split("\n").map((l, i) => `${i + 1}: ${l}`).join("\n");
-      parts.push(`<full_file>
-${numbered}
-</full_file>`);
-    }
-    parts.push("</file>");
-  }
-  if (ctx.imports.length || ctx.callers.length) {
-    parts.push(
-      "<note>The imported_file and caller_snippet blocks are background only, from files this PR did not change. Do not report findings on them; use them to judge the changed code.</note>"
-    );
-  }
-  for (const i of ctx.imports) {
-    parts.push(
-      `<imported_file path="${i.path}" imported_by="${i.importedBy}">
-${defang(i.content)}
-</imported_file>`
-    );
-  }
-  for (const c of ctx.callers) {
-    parts.push(
-      `<caller_snippet path="${c.path}" symbol="${c.symbol}">
-${defang(c.snippet)}
-</caller_snippet>`
-    );
-  }
-  const omitted = [
-    ...ctx.droppedDiffs,
-    ...ctx.droppedContents,
-    ...ctx.droppedImports,
-    ...ctx.droppedCallers ? [`${ctx.droppedCallers} caller snippet(s)`] : []
-  ];
-  if (omitted.length) {
-    parts.push(`<note>Some context was omitted to fit limits: ${omitted.join(", ")}</note>`);
-  }
-  parts.push("</pr_data>");
-  return parts.join("\n");
+  return parts;
+}
+function buildPrompt(meta3, ctx) {
+  return [
+    "<pr_data>",
+    ...headerBlocks(meta3),
+    ...ctx.files.flatMap(fileBlock),
+    ...backgroundBlocks(ctx),
+    ...omittedNote(ctx),
+    "</pr_data>"
+  ].join("\n");
 }
 
 // node_modules/@ai-sdk/provider/dist/index.js
@@ -31397,9 +31380,9 @@ var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
 function isRecursive(inst, stack, resolve2) {
-  const cached2 = recursive.get(inst);
-  if (cached2 !== void 0)
-    return cached2 ? PROVEN : NONE;
+  const cached3 = recursive.get(inst);
+  if (cached3 !== void 0)
+    return cached3 ? PROVEN : NONE;
   if (stack.has(inst))
     return PROVEN;
   stack.add(inst);
@@ -45825,15 +45808,15 @@ function visit(schema, fnOrHandlers) {
   };
   const cache = /* @__PURE__ */ new Map();
   function run2(s) {
-    const cached2 = cache.get(s);
-    if (cached2 === RESOLVING) {
+    const cached3 = cache.get(s);
+    if (cached3 === RESOLVING) {
       return new $ZodLazy({
         type: "lazy",
         getter: () => cache.get(s)
       });
     }
-    if (cached2 !== void 0)
-      return cached2;
+    if (cached3 !== void 0)
+      return cached3;
     cache.set(s, RESOLVING);
     const inner = mapInner(s);
     const mapped = fn(inner, inner !== s);
@@ -68572,12 +68555,12 @@ function convertToGoogleInteractionsInput({ prompt, previousInteractionId, store
         text: part.text
       });
       else if (part.type === "file") {
-        const fileBlock = convertFilePartToContent({
+        const fileBlock2 = convertFilePartToContent({
           part,
           warnings,
           mediaResolution
         });
-        if (fileBlock != null) content.push(fileBlock);
+        if (fileBlock2 != null) content.push(fileBlock2);
       }
       const merged = mergeAdjacentTextContent(content);
       if (merged.length > 0) steps.push({
@@ -68613,12 +68596,12 @@ function convertToGoogleInteractionsInput({ prompt, previousInteractionId, store
           }] : void 0
         });
       } else if (part.type === "file") {
-        const fileBlock = convertFilePartToContent({
+        const fileBlock2 = convertFilePartToContent({
           part,
           warnings,
           mediaResolution
         });
-        if (fileBlock != null) pendingModelOutput.push(fileBlock);
+        if (fileBlock2 != null) pendingModelOutput.push(fileBlock2);
       } else if (part.type === "custom") {
         flushModelOutput();
         const google2 = part.providerOptions?.google;
@@ -83302,6 +83285,63 @@ function diffLineMap(files) {
   return map2;
 }
 
+// src/review/chunks.ts
+async function reviewPart(input2, chunk, failures) {
+  const extras = await input2.gather(chunk);
+  const done = await runChain(input2.brains, async (b) => {
+    const ctx = buildContext(input2.prep, chunk, b.maxInputTokens - input2.reserved, extras);
+    if (ctx.files.length === 0) return null;
+    const prompt = buildPrompt(input2.meta, ctx);
+    return { review: await b.review(input2.system, prompt), ctx };
+  });
+  failures.push(...done.failures);
+  return done.result ? { ...done.result, brain: done.brain.id } : null;
+}
+async function tryPart(input2, chunk, index, failures) {
+  try {
+    return await reviewPart(input2, chunk, failures);
+  } catch (err) {
+    if (index === 0 || !(err instanceof ChainError)) throw err;
+    input2.warn(`Part ${index + 1} failed: ${err.message}`);
+    failures.push(...err.failures);
+    return null;
+  }
+}
+function mergeContexts(prep, ctxs, droppedDiffs) {
+  return {
+    ...prep,
+    files: ctxs.flatMap((c) => c.files),
+    callers: ctxs.flatMap((c) => c.callers),
+    imports: ctxs.flatMap((c) => c.imports),
+    droppedDiffs: [...droppedDiffs, ...ctxs.flatMap((c) => c.droppedDiffs)],
+    droppedContents: ctxs.flatMap((c) => c.droppedContents),
+    droppedCallers: ctxs.reduce((n, c) => n + c.droppedCallers, 0),
+    droppedImports: ctxs.flatMap((c) => c.droppedImports)
+  };
+}
+async function reviewInChunks(input2) {
+  const failures = [];
+  const parts = [];
+  const dropped = [...input2.droppedDiffs];
+  for (const [index, chunk] of input2.chunks.entries()) {
+    const part = await tryPart(input2, chunk, index, failures);
+    if (part) parts.push(part);
+    else dropped.push(...chunk.map((f) => f.path));
+  }
+  if (parts.length === 0) return null;
+  return {
+    review: mergeReviews(parts.map((p) => p.review)),
+    ctx: mergeContexts(
+      input2.prep,
+      parts.map((p) => p.ctx),
+      dropped
+    ),
+    used: [...new Set(parts.map((p) => p.brain))],
+    failures,
+    parts: parts.length
+  };
+}
+
 // src/render/summary.ts
 var ICON2 = { critical: "\u{1F534}", high: "\u{1F7E0}", medium: "\u{1F7E1}", low: "\u{1F535}" };
 function renderReview(review, brainId, ctx, failures = [], opts = {}) {
@@ -83375,6 +83415,115 @@ function renderErrorComment(message, failures = []) {
 }
 
 // src/main.ts
+var errorText = (err) => err instanceof Error ? err.message : String(err);
+function dedupe(failures) {
+  const seen = /* @__PURE__ */ new Set();
+  return failures.filter((f) => {
+    const key = `${f.brain}:${f.kind}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function logFailures(failures) {
+  for (const f of failures) {
+    const log = f.kind === "auth" ? warning : info;
+    log(`${f.brain} failed (${f.kind}): ${f.error}`);
+  }
+}
+function cached2(read2) {
+  const cache = /* @__PURE__ */ new Map();
+  return (path) => {
+    let hit = cache.get(path);
+    if (!hit) {
+      hit = read2(path);
+      cache.set(path, hit);
+    }
+    return hit;
+  };
+}
+async function selectFiles(octokit, repo, pr, all, previousSha) {
+  if (!previousSha) return { files: all };
+  if (previousSha === pr.headSha) {
+    info(`Commit ${pr.headSha} was already reviewed; nothing new to review.`);
+    return null;
+  }
+  const changes = await listChangesSince(octokit, repo, previousSha, pr.headSha);
+  if (!changes) {
+    info("Could not diff against the last reviewed commit; reviewing the whole PR.");
+    return { files: all };
+  }
+  info(`Incremental review since ${previousSha}.`);
+  return { files: changes, since: previousSha };
+}
+async function postInlineFindings(octokit, repo, pr, allFiles, findings) {
+  try {
+    const placed = placeFindings(
+      findings,
+      diffLineMap(allFiles),
+      await listCommentedLines(octokit, repo, pr.number)
+    );
+    const wanted = placed.filter((p) => p.placement === "inline").map((p) => p.finding);
+    return new Set(await postInline(octokit, repo, pr.number, pr.headSha, wanted, warning));
+  } catch (err) {
+    warning(`Inline comments failed: ${errorText(err)}`);
+    return /* @__PURE__ */ new Set();
+  }
+}
+async function reviewPr(job) {
+  const { octokit, repo, pr, brains, all, selection } = job;
+  const primary = brains[0];
+  const ignored = makeIgnore(parseIgnore(getInput("ignore")));
+  const read2 = cached2(fileReader(octokit, pr));
+  const system = buildSystemPrompt(await loadRules(readerAt(octokit, repo, pr.baseSha)));
+  const prep = await prepareFiles(selection.files, read2, ignored);
+  if (!primary || prep.candidates.length === 0) {
+    info("No reviewable files in this PR.");
+    return;
+  }
+  const root = checkoutRoot(process.env);
+  const readRepo = root ? checkoutReader(root) : read2;
+  const changed = new Set(all.map((f) => f.path));
+  const reserved = estimateTokens(system);
+  const plan = chunkFiles(prep.candidates, primary.maxInputTokens - reserved, MAX_CHUNKS);
+  if (plan.chunks.length > 1) info(`Large PR: reviewing in ${plan.chunks.length} parts.`);
+  const done = await reviewInChunks({
+    brains,
+    system,
+    reserved,
+    prep,
+    chunks: plan.chunks,
+    droppedDiffs: plan.droppedDiffs,
+    meta: { title: pr.title, body: pr.body, since: selection.since },
+    gather: async (chunk) => {
+      try {
+        return await gatherExtras(chunk, { read: readRepo, root, changed, ignored });
+      } catch (err) {
+        warning(`Could not gather extra context: ${errorText(err)}`);
+        return {};
+      }
+    },
+    warn: warning
+  });
+  if (!done) {
+    info("No reviewable files in this PR.");
+    return;
+  }
+  logFailures(done.failures);
+  const inline = pr.isFork ? /* @__PURE__ */ new Set() : await postInlineFindings(octokit, repo, pr, all, done.review.findings);
+  const content = renderReview(done.review, done.used.join(", "), done.ctx, dedupe(done.failures), {
+    inline,
+    since: selection.since,
+    parts: done.parts,
+    noCheckout: !root
+  });
+  if (pr.isFork) {
+    await job.publish(content);
+    return;
+  }
+  const body = composeSticky(job.previous, content, pr.headSha, (/* @__PURE__ */ new Date()).toISOString());
+  await writeSticky(octokit, repo, pr.number, job.existing, body);
+}
 async function run() {
   const pull = context2.payload.pull_request;
   if (!pull) {
@@ -83399,154 +83548,18 @@ async function run() {
     return;
   }
   info(`Fallback chain: ${brains.map((b) => b.id).join(" -> ")}`);
-  const raw = await listChangedFiles(octokit, repo, pr.number);
+  const all = await listChangedFiles(octokit, repo, pr.number);
   const existing = pr.isFork ? void 0 : await getSticky(octokit, repo, pr.number);
   const previous = existing?.body ? parseSticky(existing.body) : void 0;
-  let reviewFiles = raw;
-  let since;
-  if (previous?.sha) {
-    if (previous.sha === pr.headSha) {
-      info(`Commit ${pr.headSha} was already reviewed; nothing new to review.`);
-      return;
-    }
-    const changes = await listChangesSince(octokit, repo, previous.sha, pr.headSha);
-    if (changes) {
-      reviewFiles = changes;
-      since = previous.sha;
-      info(`Incremental review since ${since}.`);
-    } else {
-      info("Could not diff against the last reviewed commit; reviewing the whole PR.");
-    }
-  }
-  const read2 = fileReader(octokit, pr);
-  const cache = /* @__PURE__ */ new Map();
-  const cachedRead = (path) => {
-    let hit = cache.get(path);
-    if (!hit) {
-      hit = read2(path);
-      cache.set(path, hit);
-    }
-    return hit;
-  };
+  const selection = await selectFiles(octokit, repo, pr, all, previous?.sha);
+  if (!selection) return;
   try {
-    const ignored = makeIgnore(parseIgnore(getInput("ignore")));
-    const rules = await loadRules(readerAt(octokit, repo, pr.baseSha));
-    const system = buildSystemPrompt(rules);
-    const reserved = estimateTokens(system);
-    const root = checkoutRoot(process.env);
-    const readRepo = root ? checkoutReader(root) : cachedRead;
-    const changed = new Set(raw.map((f) => f.path));
-    const prep = await prepareFiles(reviewFiles, cachedRead, ignored);
-    const primary = brains[0];
-    if (prep.candidates.length === 0 || !primary) {
-      info("No reviewable files in this PR.");
-      return;
-    }
-    const plan = chunkFiles(prep.candidates, primary.maxInputTokens - reserved, MAX_CHUNKS);
-    if (plan.chunks.length > 1) info(`Large PR: reviewing in ${plan.chunks.length} parts.`);
-    const reviews = [];
-    const ctxs = [];
-    const used = [];
-    const failures = [];
-    const droppedDiffs = [...plan.droppedDiffs];
-    for (const [n, chunk] of plan.chunks.entries()) {
-      let extras = {};
-      try {
-        extras = await gatherExtras(chunk, { read: readRepo, root, changed, ignored });
-      } catch (err) {
-        warning(
-          `Could not gather extra context: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-      try {
-        const done = await runChain(brains, async (b) => {
-          const ctx = buildContext(prep, chunk, b.maxInputTokens - reserved, extras);
-          if (ctx.files.length === 0) return null;
-          const prompt = buildPrompt({ title: pr.title, body: pr.body, since }, ctx);
-          return { review: await b.review(system, prompt), ctx };
-        });
-        failures.push(...done.failures);
-        if (!done.result) {
-          droppedDiffs.push(...chunk.map((f) => f.path));
-          continue;
-        }
-        reviews.push(done.result.review);
-        ctxs.push(done.result.ctx);
-        if (!used.includes(done.brain.id)) used.push(done.brain.id);
-      } catch (err) {
-        if (n === 0 || !(err instanceof ChainError)) throw err;
-        warning(`Part ${n + 1} failed: ${err.message}`);
-        failures.push(...err.failures);
-        droppedDiffs.push(...chunk.map((f) => f.path));
-      }
-    }
-    for (const f of failures) {
-      const log = f.kind === "auth" ? warning : info;
-      log(`${f.brain} failed (${f.kind}): ${f.error}`);
-    }
-    if (reviews.length === 0) {
-      info("No reviewable files in this PR.");
-      return;
-    }
-    const result = { review: mergeReviews(reviews) };
-    const merged = {
-      ...prep,
-      files: ctxs.flatMap((c) => c.files),
-      callers: ctxs.flatMap((c) => c.callers),
-      imports: ctxs.flatMap((c) => c.imports),
-      droppedDiffs: [...droppedDiffs, ...ctxs.flatMap((c) => c.droppedDiffs)],
-      droppedContents: ctxs.flatMap((c) => c.droppedContents),
-      droppedCallers: ctxs.reduce((n, c) => n + c.droppedCallers, 0),
-      droppedImports: ctxs.flatMap((c) => c.droppedImports)
-    };
-    const inline = /* @__PURE__ */ new Set();
-    if (!pr.isFork) {
-      try {
-        const placed = placeFindings(
-          result.review.findings,
-          diffLineMap(raw),
-          await listCommentedLines(octokit, repo, pr.number)
-        );
-        const wanted = placed.filter((p) => p.placement === "inline").map((p) => p.finding);
-        for (const f of await postInline(
-          octokit,
-          repo,
-          pr.number,
-          pr.headSha,
-          wanted,
-          warning
-        )) {
-          inline.add(f);
-        }
-      } catch (err) {
-        warning(`Inline comments failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-    const content = renderReview(result.review, used.join(", "), merged, dedupe(failures), {
-      inline,
-      since,
-      parts: reviews.length,
-      noCheckout: !root
-    });
-    if (pr.isFork) {
-      await publish(content);
-    } else {
-      const body = composeSticky(previous, content, pr.headSha, (/* @__PURE__ */ new Date()).toISOString());
-      await writeSticky(octokit, repo, pr.number, existing, body);
-    }
+    await reviewPr({ octokit, repo, pr, brains, all, selection, previous, existing, publish });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    error(message);
-    await publish(renderErrorComment(message, err instanceof ChainError ? err.failures : []));
+    error(errorText(err));
+    await publish(
+      renderErrorComment(errorText(err), err instanceof ChainError ? err.failures : [])
+    );
   }
 }
-function dedupe(failures) {
-  const seen = /* @__PURE__ */ new Set();
-  return failures.filter((f) => {
-    const key = `${f.brain}:${f.kind}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-run().catch((err) => setFailed(err instanceof Error ? err.message : String(err)));
+run().catch((err) => setFailed(errorText(err)));

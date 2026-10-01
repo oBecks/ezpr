@@ -17,15 +17,12 @@ const MAX_IMPORTS_PER_FILE = 10;
 const JS_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'];
 const C_EXTS = ['.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.hxx'];
 
-type Lang = 'js' | 'py' | 'c' | 'other';
+/** Alternatives, in preference order, for one import; the first that exists is its target. */
+type Candidates = string[];
+type Extractor = (file: string, content: string) => Candidates[];
 
-function langOf(file: string): Lang {
-  const ext = posix.extname(file).toLowerCase();
-  if (JS_EXTS.includes(ext)) return 'js';
-  if (ext === '.py') return 'py';
-  if (C_EXTS.includes(ext)) return 'c';
-  return 'other';
-}
+const specifiers = (re: RegExp, content: string): string[] =>
+  [...content.matchAll(re)].map((m) => m[1] ?? '');
 
 function jsAlternatives(base: string): string[] {
   const ext = posix.extname(base);
@@ -37,75 +34,116 @@ function jsAlternatives(base: string): string[] {
   return [...JS_EXTS.map((e) => base + e), ...JS_EXTS.map((e) => `${base}/index${e}`)];
 }
 
-function pyAlternatives(base: string): string[] {
-  return [`${base}.py`, `${base}/__init__.py`];
+const pyAlternatives = (base: string): string[] => [`${base}.py`, `${base}/__init__.py`];
+
+const jsImports: Extractor = (file, content) => {
+  const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](\.{1,2}(?:\/[^'"]*)?)['"]/g;
+  return specifiers(re, content).map((spec) =>
+    jsAlternatives(posix.join(posix.dirname(file), spec)),
+  );
+};
+
+/** `import a.b` and `from a.b import c`: relative to the repo root, the file, or `src/`. */
+const pyAbsolute = (file: string, mod: string): Candidates =>
+  [mod, posix.join(posix.dirname(file), mod), `src/${mod}`].flatMap(pyAlternatives);
+
+/** `from .x import y` and `from . import y, z`. */
+function pyRelative(file: string, dots: string, mod: string, names: string): Candidates[] {
+  let base = posix.dirname(file);
+  for (let i = 1; i < dots.length; i++) base = posix.dirname(base);
+  if (mod) return [pyAlternatives(posix.join(base, mod))];
+  const listed = names.split(',').map((n) => n.trim().split(/\s+/)[0] ?? '');
+  return listed.filter(Boolean).map((n) => pyAlternatives(posix.join(base, n)));
+}
+
+const pyFrom: Extractor = (file, content) => {
+  const re = /^[ \t]*from[ \t]+(\.*)([\w.]*)[ \t]+import[ \t]+([\w, ]+)/gm;
+  return [...content.matchAll(re)].flatMap((m) => {
+    const [dots = '', rawMod = '', names = ''] = [m[1], m[2], m[3]];
+    const mod = rawMod.replace(/\./g, '/');
+    if (dots) return pyRelative(file, dots, mod, names);
+    return mod ? [pyAbsolute(file, mod)] : [];
+  });
+};
+
+const pyPlain: Extractor = (file, content) =>
+  specifiers(/^[ \t]*import[ \t]+([\w., ]+)/gm, content)
+    .flatMap((list) => list.split(','))
+    .map((n) => (n.trim().split(/\s+/)[0] ?? '').replace(/\./g, '/'))
+    .filter(Boolean)
+    .map((mod) => pyAbsolute(file, mod));
+
+const pyImports: Extractor = (file, content) => [
+  ...pyFrom(file, content),
+  ...pyPlain(file, content),
+];
+
+const cImports: Extractor = (file, content) =>
+  specifiers(/^[ \t]*#[ \t]*include[ \t]+"([^"]+)"/gm, content).map((spec) => [
+    posix.join(posix.dirname(file), spec),
+    spec,
+    `include/${spec}`,
+  ]);
+
+/** Other languages: any quoted relative path on an import-like line. */
+const otherImports: Extractor = (file, content) => {
+  const re = /\b(?:import|require|include|use|from|source)\b[^\n'"]*['"](\.{1,2}\/[^'"]+)['"]/g;
+  return specifiers(re, content).map((spec) => {
+    const target = posix.join(posix.dirname(file), spec);
+    return [target, target + posix.extname(file)];
+  });
+};
+
+function extractorFor(file: string): Extractor {
+  const ext = posix.extname(file).toLowerCase();
+  if (JS_EXTS.includes(ext)) return jsImports;
+  if (ext === '.py') return pyImports;
+  if (C_EXTS.includes(ext)) return cImports;
+  return otherImports;
 }
 
 /**
- * Repo-relative paths each import of `file` may refer to. Each inner list is one import,
- * its alternatives in preference order; the first that exists is the import's target.
- * Only repo-local candidates are produced: packages and the standard library never resolve.
+ * Repo-relative paths each import of `file` may refer to. Only repo-local candidates are
+ * produced: packages and the standard library never resolve.
  */
-export function importCandidates(file: string, content: string): string[][] {
-  const dir = posix.dirname(file);
-  const out: string[][] = [];
-  const lang = langOf(file);
-
-  if (lang === 'js') {
-    const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](\.{1,2}(?:\/[^'"]*)?)['"]/g;
-    for (const m of content.matchAll(re)) {
-      out.push(jsAlternatives(posix.join(dir, m[1] ?? '')));
-    }
-  } else if (lang === 'py') {
-    const absolute = (mod: string) =>
-      [mod, posix.join(dir, mod), `src/${mod}`].flatMap(pyAlternatives);
-    for (const m of content.matchAll(
-      /^[ \t]*from[ \t]+(\.*)([\w.]*)[ \t]+import[ \t]+([\w, ]+)/gm,
-    )) {
-      const dots = m[1] ?? '';
-      const mod = (m[2] ?? '').replace(/\./g, '/');
-      if (dots) {
-        let base = dir;
-        for (let i = 1; i < dots.length; i++) base = posix.dirname(base);
-        if (mod) {
-          out.push(pyAlternatives(posix.join(base, mod)));
-        } else {
-          for (const n of (m[3] ?? '').split(',')) {
-            const name = n.trim().split(/\s+/)[0];
-            if (name) out.push(pyAlternatives(posix.join(base, name)));
-          }
-        }
-      } else if (mod) {
-        out.push(absolute(mod));
-      }
-    }
-    for (const m of content.matchAll(/^[ \t]*import[ \t]+([\w., ]+)/gm)) {
-      for (const n of (m[1] ?? '').split(',')) {
-        const mod = (n.trim().split(/\s+/)[0] ?? '').replace(/\./g, '/');
-        if (mod) out.push(absolute(mod));
-      }
-    }
-  } else if (lang === 'c') {
-    for (const m of content.matchAll(/^[ \t]*#[ \t]*include[ \t]+"([^"]+)"/gm)) {
-      const spec = m[1] ?? '';
-      out.push([posix.join(dir, spec), spec, `include/${spec}`]);
-    }
-  } else {
-    // Other languages: any quoted relative path on an import-like line.
-    const ext = posix.extname(file);
-    const re = /\b(?:import|require|include|use|from|source)\b[^\n'"]*['"](\.{1,2}\/[^'"]+)['"]/g;
-    for (const m of content.matchAll(re)) {
-      const target = posix.join(dir, m[1] ?? '');
-      out.push([target, target + ext]);
-    }
-  }
-  return out;
+export function importCandidates(file: string, content: string): Candidates[] {
+  return extractorFor(file)(file, content);
 }
 
 export interface ResolveOptions {
   /** Paths already in the review (changed files); never sent twice. */
   exclude: ReadonlySet<string>;
   ignored: (path: string) => boolean;
+}
+
+/** A normalised in-repo path, or null for anything that points outside or at the file itself. */
+function localPath(raw: string, file: string): string | null {
+  const p = posix.normalize(raw);
+  return p.startsWith('..') || posix.isAbsolute(p) || p === file ? null : p;
+}
+
+const mayRead = (p: string, opts: ResolveOptions): boolean =>
+  skipReason(p) === null && !opts.ignored(p);
+
+/** The first alternative that exists and may be sent, or null. */
+async function resolveOne(
+  file: string,
+  alternatives: Candidates,
+  read: (path: string) => Promise<string | null>,
+  opts: ResolveOptions,
+): Promise<ImportedFile | null> {
+  for (const raw of alternatives) {
+    const p = localPath(raw, file);
+    if (p === null) continue;
+    if (opts.exclude.has(p)) return null;
+    if (!mayRead(p, opts)) continue;
+    const text = await read(p);
+    if (text === null) continue;
+    return text.length <= MAX_IMPORT_CHARS
+      ? { path: p, importedBy: file, content: redact(text) }
+      : null;
+  }
+  return null;
 }
 
 /** Reads the repo-local files that `file` imports (one hop, whole file, redacted). */
@@ -116,20 +154,10 @@ export async function resolveImports(
   opts: ResolveOptions,
 ): Promise<ImportedFile[]> {
   const found: ImportedFile[] = [];
-  for (const alts of importCandidates(file, content)) {
+  for (const alternatives of importCandidates(file, content)) {
     if (found.length >= MAX_IMPORTS_PER_FILE) break;
-    for (const raw of alts) {
-      const p = posix.normalize(raw);
-      if (p.startsWith('..') || posix.isAbsolute(p) || p === file) continue;
-      if (opts.exclude.has(p)) break;
-      if (skipReason(p) !== null || opts.ignored(p)) continue;
-      const text = await read(p);
-      if (text === null) continue;
-      if (text.length <= MAX_IMPORT_CHARS) {
-        found.push({ path: p, importedBy: file, content: redact(text) });
-      }
-      break;
-    }
+    const hit = await resolveOne(file, alternatives, read, opts);
+    if (hit) found.push(hit);
   }
   return found;
 }

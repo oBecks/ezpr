@@ -1,11 +1,11 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { mergeReviews, chunkFiles } from './context/chunk';
-import { buildContext, prepareFiles, type Context } from './context/collect';
+import { estimateTokens } from './context/budget';
+import { chunkFiles } from './context/chunk';
+import { prepareFiles, type RawFile } from './context/collect';
 import { makeIgnore, parseIgnore } from './context/ignore';
 import { checkoutReader, checkoutRoot, gatherExtras } from './context/repo';
 import { loadRules } from './context/rules';
-import { estimateTokens } from './context/budget';
 import { MAX_CHUNKS } from './config';
 import {
   getSticky,
@@ -14,15 +14,188 @@ import {
   upsertSummary,
   writeSticky,
 } from './github/comments';
-import { fileReader, listChangedFiles, listChangesSince, loadPr, readerAt } from './github/pr';
-import { composeSticky, parseSticky } from './github/sticky';
-import { buildPrompt, buildSystemPrompt } from './prompt/builder';
-import type { Finding, Review } from './prompt/schema';
-import { ChainError, runChain, type ChainFailure } from './providers/chain';
+import {
+  fileReader,
+  listChangedFiles,
+  listChangesSince,
+  loadPr,
+  readerAt,
+  type Octokit,
+  type PrInfo,
+} from './github/pr';
+import { composeSticky, parseSticky, type StickyState } from './github/sticky';
+import { buildSystemPrompt } from './prompt/builder';
+import type { Finding } from './prompt/schema';
+import { ChainError, type ChainFailure } from './providers/chain';
 import { buildBrains } from './providers/registry';
 import { diffLineMap } from './review/diffmap';
+import { reviewInChunks } from './review/chunks';
 import { placeFindings } from './review/place';
 import { renderErrorComment, renderReview, renderSetupComment } from './render/summary';
+
+type Repo = { owner: string; repo: string };
+
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** The same failure from several parts is reported once. */
+function dedupe(failures: ChainFailure[]): ChainFailure[] {
+  const seen = new Set<string>();
+  return failures.filter((f) => {
+    const key = `${f.brain}:${f.kind}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function logFailures(failures: ChainFailure[]): void {
+  for (const f of failures) {
+    const log = f.kind === 'auth' ? core.warning : core.info;
+    log(`${f.brain} failed (${f.kind}): ${f.error}`);
+  }
+}
+
+/** Reads each repo file at most once per run. */
+function cached(read: (path: string) => Promise<string | null>) {
+  const cache = new Map<string, Promise<string | null>>();
+  return (path: string): Promise<string | null> => {
+    let hit = cache.get(path);
+    if (!hit) {
+      hit = read(path);
+      cache.set(path, hit);
+    }
+    return hit;
+  };
+}
+
+interface Selection {
+  files: RawFile[];
+  since?: string;
+}
+
+/**
+ * The sticky Summary records the last reviewed commit; a new push reviews only what changed
+ * since. Null when the head commit was already reviewed.
+ */
+async function selectFiles(
+  octokit: Octokit,
+  repo: Repo,
+  pr: PrInfo,
+  all: RawFile[],
+  previousSha: string | undefined,
+): Promise<Selection | null> {
+  if (!previousSha) return { files: all };
+  if (previousSha === pr.headSha) {
+    core.info(`Commit ${pr.headSha} was already reviewed; nothing new to review.`);
+    return null;
+  }
+  const changes = await listChangesSince(octokit, repo, previousSha, pr.headSha);
+  if (!changes) {
+    core.info('Could not diff against the last reviewed commit; reviewing the whole PR.');
+    return { files: all };
+  }
+  core.info(`Incremental review since ${previousSha}.`);
+  return { files: changes, since: previousSha };
+}
+
+/** Posts the Findings that qualify as inline comments; returns the ones that were posted. */
+async function postInlineFindings(
+  octokit: Octokit,
+  repo: Repo,
+  pr: PrInfo,
+  allFiles: RawFile[],
+  findings: Finding[],
+): Promise<Set<Finding>> {
+  try {
+    // Inline comments must land on lines of the full PR diff, not just the incremental one.
+    const placed = placeFindings(
+      findings,
+      diffLineMap(allFiles),
+      await listCommentedLines(octokit, repo, pr.number),
+    );
+    const wanted = placed.filter((p) => p.placement === 'inline').map((p) => p.finding);
+    return new Set(await postInline(octokit, repo, pr.number, pr.headSha, wanted, core.warning));
+  } catch (err) {
+    core.warning(`Inline comments failed: ${errorText(err)}`);
+    return new Set();
+  }
+}
+
+interface ReviewJob {
+  octokit: Octokit;
+  repo: Repo;
+  pr: PrInfo;
+  brains: ReturnType<typeof buildBrains>;
+  /** Every file of the PR. */
+  all: RawFile[];
+  selection: Selection;
+  previous: StickyState | undefined;
+  existing: Awaited<ReturnType<typeof getSticky>>;
+  publish: (body: string) => Promise<void>;
+}
+
+async function reviewPr(job: ReviewJob): Promise<void> {
+  const { octokit, repo, pr, brains, all, selection } = job;
+  const primary = brains[0];
+  const ignored = makeIgnore(parseIgnore(core.getInput('ignore')));
+  const read = cached(fileReader(octokit, pr));
+  // Project rules come from the base branch so a PR cannot rewrite its own rules (ADR-0006).
+  const system = buildSystemPrompt(await loadRules(readerAt(octokit, repo, pr.baseSha)));
+  const prep = await prepareFiles(selection.files, read, ignored);
+  if (!primary || prep.candidates.length === 0) {
+    core.info('No reviewable files in this PR.');
+    return;
+  }
+
+  // Imports and callers come from the checkout when there is one (ADR-0007).
+  const root = checkoutRoot(process.env);
+  const readRepo = root ? checkoutReader(root) : read;
+  const changed = new Set(all.map((f) => f.path));
+  const reserved = estimateTokens(system);
+  // Chunks are sized for the first Brain; a smaller fallback Brain trims its own copy.
+  const plan = chunkFiles(prep.candidates, primary.maxInputTokens - reserved, MAX_CHUNKS);
+  if (plan.chunks.length > 1) core.info(`Large PR: reviewing in ${plan.chunks.length} parts.`);
+
+  const done = await reviewInChunks({
+    brains,
+    system,
+    reserved,
+    prep,
+    chunks: plan.chunks,
+    droppedDiffs: plan.droppedDiffs,
+    meta: { title: pr.title, body: pr.body, since: selection.since },
+    gather: async (chunk) => {
+      try {
+        return await gatherExtras(chunk, { read: readRepo, root, changed, ignored });
+      } catch (err) {
+        core.warning(`Could not gather extra context: ${errorText(err)}`);
+        return {};
+      }
+    },
+    warn: core.warning,
+  });
+  if (!done) {
+    core.info('No reviewable files in this PR.');
+    return;
+  }
+  logFailures(done.failures);
+
+  const inline = pr.isFork
+    ? new Set<Finding>()
+    : await postInlineFindings(octokit, repo, pr, all, done.review.findings);
+  const content = renderReview(done.review, done.used.join(', '), done.ctx, dedupe(done.failures), {
+    inline,
+    since: selection.since,
+    parts: done.parts,
+    noCheckout: !root,
+  });
+  if (pr.isFork) {
+    await job.publish(content);
+    return;
+  }
+  const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
+  await writeSticky(octokit, repo, pr.number, job.existing, body);
+}
 
 async function run(): Promise<void> {
   const pull = github.context.payload.pull_request;
@@ -53,168 +226,20 @@ async function run(): Promise<void> {
   }
   core.info(`Fallback chain: ${brains.map((b) => b.id).join(' -> ')}`);
 
-  const raw = await listChangedFiles(octokit, repo, pr.number);
-
-  // The sticky Summary records the last reviewed commit; a new push reviews only what changed since.
+  const all = await listChangedFiles(octokit, repo, pr.number);
   const existing = pr.isFork ? undefined : await getSticky(octokit, repo, pr.number);
   const previous = existing?.body ? parseSticky(existing.body) : undefined;
-  let reviewFiles = raw;
-  let since: string | undefined;
-  if (previous?.sha) {
-    if (previous.sha === pr.headSha) {
-      core.info(`Commit ${pr.headSha} was already reviewed; nothing new to review.`);
-      return;
-    }
-    const changes = await listChangesSince(octokit, repo, previous.sha, pr.headSha);
-    if (changes) {
-      reviewFiles = changes;
-      since = previous.sha;
-      core.info(`Incremental review since ${since}.`);
-    } else {
-      core.info('Could not diff against the last reviewed commit; reviewing the whole PR.');
-    }
-  }
-  const read = fileReader(octokit, pr);
-  const cache = new Map<string, Promise<string | null>>();
-  const cachedRead = (path: string) => {
-    let hit = cache.get(path);
-    if (!hit) {
-      hit = read(path);
-      cache.set(path, hit);
-    }
-    return hit;
-  };
+  const selection = await selectFiles(octokit, repo, pr, all, previous?.sha);
+  if (!selection) return;
 
   try {
-    const ignored = makeIgnore(parseIgnore(core.getInput('ignore')));
-    // Project rules come from the base branch so a PR cannot rewrite its own rules (ADR-0006).
-    const rules = await loadRules(readerAt(octokit, repo, pr.baseSha));
-    const system = buildSystemPrompt(rules);
-    const reserved = estimateTokens(system);
-
-    // Imports and callers come from the checkout when there is one (ADR-0007).
-    const root = checkoutRoot(process.env);
-    const readRepo = root ? checkoutReader(root) : cachedRead;
-    const changed = new Set(raw.map((f) => f.path));
-
-    const prep = await prepareFiles(reviewFiles, cachedRead, ignored);
-    const primary = brains[0];
-    if (prep.candidates.length === 0 || !primary) {
-      core.info('No reviewable files in this PR.');
-      return;
-    }
-    // Chunks are sized for the first Brain; a smaller fallback Brain trims its own copy.
-    const plan = chunkFiles(prep.candidates, primary.maxInputTokens - reserved, MAX_CHUNKS);
-    if (plan.chunks.length > 1) core.info(`Large PR: reviewing in ${plan.chunks.length} parts.`);
-
-    const reviews: Review[] = [];
-    const ctxs: Context[] = [];
-    const used: string[] = [];
-    const failures: ChainFailure[] = [];
-    const droppedDiffs = [...plan.droppedDiffs];
-    for (const [n, chunk] of plan.chunks.entries()) {
-      let extras = {};
-      try {
-        extras = await gatherExtras(chunk, { read: readRepo, root, changed, ignored });
-      } catch (err) {
-        core.warning(
-          `Could not gather extra context: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      try {
-        const done = await runChain(brains, async (b) => {
-          // Each Brain gets Context trimmed to its own budget.
-          const ctx = buildContext(prep, chunk, b.maxInputTokens - reserved, extras);
-          if (ctx.files.length === 0) return null;
-          const prompt = buildPrompt({ title: pr.title, body: pr.body, since }, ctx);
-          return { review: await b.review(system, prompt), ctx };
-        });
-        failures.push(...done.failures);
-        if (!done.result) {
-          droppedDiffs.push(...chunk.map((f) => f.path));
-          continue;
-        }
-        reviews.push(done.result.review);
-        ctxs.push(done.result.ctx);
-        if (!used.includes(done.brain.id)) used.push(done.brain.id);
-      } catch (err) {
-        // The first part failing is a failed Review; a later part is reported as left out.
-        if (n === 0 || !(err instanceof ChainError)) throw err;
-        core.warning(`Part ${n + 1} failed: ${err.message}`);
-        failures.push(...err.failures);
-        droppedDiffs.push(...chunk.map((f) => f.path));
-      }
-    }
-    for (const f of failures) {
-      const log = f.kind === 'auth' ? core.warning : core.info;
-      log(`${f.brain} failed (${f.kind}): ${f.error}`);
-    }
-    if (reviews.length === 0) {
-      core.info('No reviewable files in this PR.');
-      return;
-    }
-    const result = { review: mergeReviews(reviews) };
-    const merged: Context = {
-      ...prep,
-      files: ctxs.flatMap((c) => c.files),
-      callers: ctxs.flatMap((c) => c.callers),
-      imports: ctxs.flatMap((c) => c.imports),
-      droppedDiffs: [...droppedDiffs, ...ctxs.flatMap((c) => c.droppedDiffs)],
-      droppedContents: ctxs.flatMap((c) => c.droppedContents),
-      droppedCallers: ctxs.reduce((n, c) => n + c.droppedCallers, 0),
-      droppedImports: ctxs.flatMap((c) => c.droppedImports),
-    };
-    const inline = new Set<Finding>();
-    if (!pr.isFork) {
-      try {
-        // Inline comments must land on lines of the full PR diff, not just the incremental one.
-        const placed = placeFindings(
-          result.review.findings,
-          diffLineMap(raw),
-          await listCommentedLines(octokit, repo, pr.number),
-        );
-        const wanted = placed.filter((p) => p.placement === 'inline').map((p) => p.finding);
-        for (const f of await postInline(
-          octokit,
-          repo,
-          pr.number,
-          pr.headSha,
-          wanted,
-          core.warning,
-        )) {
-          inline.add(f);
-        }
-      } catch (err) {
-        core.warning(`Inline comments failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-    const content = renderReview(result.review, used.join(', '), merged, dedupe(failures), {
-      inline,
-      since,
-      parts: reviews.length,
-      noCheckout: !root,
-    });
-    if (pr.isFork) {
-      await publish(content);
-    } else {
-      const body = composeSticky(previous, content, pr.headSha, new Date().toISOString());
-      await writeSticky(octokit, repo, pr.number, existing, body);
-    }
+    await reviewPr({ octokit, repo, pr, brains, all, selection, previous, existing, publish });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    core.error(message);
-    await publish(renderErrorComment(message, err instanceof ChainError ? err.failures : []));
+    core.error(errorText(err));
+    await publish(
+      renderErrorComment(errorText(err), err instanceof ChainError ? err.failures : []),
+    );
   }
 }
 
-function dedupe(failures: ChainFailure[]): ChainFailure[] {
-  const seen = new Set<string>();
-  return failures.filter((f) => {
-    const key = `${f.brain}:${f.kind}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-run().catch((err) => core.setFailed(err instanceof Error ? err.message : String(err)));
+run().catch((err) => core.setFailed(errorText(err)));

@@ -36,28 +36,28 @@ export interface GatherOptions {
   ignored: (path: string) => boolean;
 }
 
+/** Imported files of every changed file in the chunk, each path once. */
+async function gatherImports(chunk: FileEntry[], opts: GatherOptions): Promise<ImportedFile[]> {
+  const withContent = chunk.filter((f) => f.content !== undefined);
+  const lists = await Promise.all(
+    withContent.map((f) =>
+      resolveImports(f.path, f.content ?? '', opts.read, {
+        exclude: opts.changed,
+        ignored: opts.ignored,
+      }),
+    ),
+  );
+  return lists.flat().filter((i, n, all) => all.findIndex((j) => j.path === i.path) === n);
+}
+
 /** Imported files and Caller snippets for one chunk of changed files. */
 export async function gatherExtras(chunk: FileEntry[], opts: GatherOptions): Promise<Extras> {
-  const imports: ImportedFile[] = [];
-  const seen = new Set<string>();
-  for (const f of chunk) {
-    if (f.content === undefined) continue;
-    const found = await resolveImports(f.path, f.content, opts.read, {
-      exclude: opts.changed,
-      ignored: opts.ignored,
-    });
-    for (const i of found) {
-      if (seen.has(i.path)) continue;
-      seen.add(i.path);
-      imports.push(i);
-    }
-  }
-  let callers: CallerSnippet[] = [];
-  if (opts.root) {
-    callers = await findCallers(opts.root, symbolsOf(chunk), {
-      exclude: opts.changed,
-      ignored: opts.ignored,
-    });
-  }
+  const imports = await gatherImports(chunk, opts);
+  const callers: CallerSnippet[] = opts.root
+    ? await findCallers(opts.root, symbolsOf(chunk), {
+        exclude: opts.changed,
+        ignored: opts.ignored,
+      })
+    : [];
   return { imports, callers };
 }
