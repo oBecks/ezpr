@@ -34,7 +34,6 @@ export function fitToBudget(files: FileEntry[], budgetTokens: number): Fitted {
       droppedDiffs.push(f.path);
       continue;
     }
-    used += cost;
     kept.push({ ...f, content: undefined });
   }
 
