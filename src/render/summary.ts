@@ -1,11 +1,19 @@
 import { SUMMARY_MARKER } from '../config';
-import type { Context } from '../context/collect';
+import type { Context, Prepared } from '../context/collect';
 import { shortSha } from '../github/sticky';
 import type { Finding, Review } from '../prompt/schema';
 import type { ChainFailure } from '../providers/chain';
 import { describeFailure } from '../providers/errors';
 
 const ICON = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' } as const;
+
+const MAX_LISTED = 10;
+
+function paths(list: string[]): string {
+  const shown = list.slice(0, MAX_LISTED).map((p) => `\`${p}\``);
+  const more = list.length - shown.length;
+  return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ');
+}
 
 export function renderReview(
   review: Review,
@@ -15,8 +23,13 @@ export function renderReview(
   opts: {
     inline?: ReadonlySet<Finding>;
     since?: string;
-    /** Number of Chunks the Review was split into. */
+    /** Chunks that produced a Review, and Chunks planned. */
     parts?: number;
+    plannedParts?: number;
+    /** Files of Chunks that no Brain could review. */
+    unreviewed?: string[];
+    /** Ids of the Brains that wrote a part. */
+    used?: string[];
     /** The workflow had no repo checkout, so Caller snippets were not searched. */
     noCheckout?: boolean;
   } = {},
@@ -26,8 +39,15 @@ export function renderReview(
     lines.push(`_Incremental review: changes since \`${shortSha(opts.since)}\`._`, '');
   }
   lines.push(review.summary, '');
-  if (opts.parts && opts.parts > 1) {
-    lines.push(`_Large PR: reviewed in ${opts.parts} parts._`, '');
+  const planned = opts.plannedParts ?? opts.parts ?? 1;
+  if (planned > 1) {
+    const done = opts.parts ?? planned;
+    lines.push(
+      done === planned
+        ? `_Large PR: reviewed in ${planned} parts._`
+        : `_Large PR: ${done} of ${planned} parts reviewed._`,
+      '',
+    );
   }
 
   if (review.findings.length) {
@@ -41,6 +61,22 @@ export function renderReview(
     lines.push('');
   }
 
+  const unreviewed = opts.unreviewed ?? [];
+  const notSeen = ctx.droppedDiffs.length + unreviewed.length;
+  if (notSeen > 0) {
+    const total = ctx.files.length + notSeen;
+    lines.push(
+      `> ⚠️ Partial review: ${ctx.files.length} of ${total} changed files were reviewed. The summary above covers only those.`,
+      '',
+    );
+  }
+  if (unreviewed.length) {
+    lines.push(`> Not reviewed (no model could handle this part): ${paths(unreviewed)}`, '');
+  }
+  const skipped = [...ctx.skippedIgnored, ...ctx.skippedSecrets];
+  if (skipped.length) {
+    lines.push(`> Not sent to a model (ignore list or secret-like files): ${paths(skipped)}`, '');
+  }
   const omitted = [...ctx.droppedDiffs, ...ctx.droppedContents, ...ctx.droppedImports];
   if (ctx.droppedCallers) omitted.push(`${ctx.droppedCallers} caller snippet(s)`);
   if (omitted.length) {
@@ -54,15 +90,46 @@ export function renderReview(
     );
   }
   if (failures.length) {
-    lines.push(`> ${renderFailures(failures)}`, '');
+    lines.push(`> ${renderFailures(failures, opts.used)}`, '');
   }
   lines.push(`<sub>Reviewed by EzPR using \`${brainId}\`</sub>`);
   return lines.join('\n');
 }
 
-export function renderFailures(failures: ChainFailure[]): string {
-  const list = failures.map((f) => `\`${f.brain}\` ${describeFailure(f.kind)}`).join('; ');
-  return `Fell back past: ${list}.`;
+/** A Brain that also wrote a part failed only on some parts; the rest were skipped entirely. */
+export function renderFailures(failures: ChainFailure[], used: string[] = []): string {
+  const text = (f: ChainFailure) => `\`${f.brain}\` ${describeFailure(f.kind)}`;
+  const partial = failures.filter((f) => used.includes(f.brain));
+  const skipped = failures.filter((f) => !used.includes(f.brain));
+  const out: string[] = [];
+  if (skipped.length) out.push(`Fell back past: ${skipped.map(text).join('; ')}.`);
+  if (partial.length) out.push(`Failed on some parts: ${partial.map(text).join('; ')}.`);
+  return out.join(' ');
+}
+
+/** The Summary for a PR where every changed file was skipped before reaching a model. */
+export function renderNothingToReview(prep: Omit<Prepared, 'candidates'>, total: number): string {
+  const lines = [
+    '## EzPR review',
+    '',
+    `Nothing was sent to a model: all ${total} changed file(s) were skipped.`,
+    '',
+  ];
+  if (prep.missingPatch.length) {
+    lines.push(
+      `- No diff available from GitHub (the change is too large; try splitting the PR): ${paths(prep.missingPatch)}`,
+    );
+  }
+  if (prep.skippedIgnored.length) {
+    lines.push(`- Matched the \`ignore\` list: ${paths(prep.skippedIgnored)}`);
+  }
+  if (prep.skippedSecrets.length) {
+    lines.push(`- Secret-like files: ${paths(prep.skippedSecrets)}`);
+  }
+  if (prep.skippedNoise.length) {
+    lines.push(`- Generated, binary or lock files: ${paths(prep.skippedNoise)}`);
+  }
+  return lines.join('\n');
 }
 
 export function renderSetupComment(): string {

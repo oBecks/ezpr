@@ -1,6 +1,6 @@
 import { generateObject, type LanguageModel } from 'ai';
 import type { ProviderId } from '../config';
-import { ReviewSchema } from '../prompt/schema';
+import { JSON_SHAPE_INSTRUCTION, ReviewSchema } from '../prompt/schema';
 import type { Brain } from './types';
 
 const REQUEST_TIMEOUT_MS = 120_000;
@@ -11,6 +11,8 @@ export function aiSdkBrain(opts: {
   modelName: string;
   maxInputTokens: number;
   model: LanguageModel;
+  /** False when the provider cannot enforce the schema, so the prompt has to describe it. */
+  structuredOutputs?: boolean;
 }): Brain {
   return {
     provider: opts.provider,
@@ -23,7 +25,12 @@ export function aiSdkBrain(opts: {
       const { object } = await generateObject({
         model: opts.model,
         schema: ReviewSchema,
-        system,
+        system:
+          opts.structuredOutputs === false
+            ? `${system}
+
+${JSON_SHAPE_INSTRUCTION}`
+            : system,
         prompt,
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

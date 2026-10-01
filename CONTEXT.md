@@ -56,4 +56,4 @@ A few lines around a place outside the changed files that uses a symbol the pull
 Path globs, set by the Action's `ignore` input, that are never sent to a Brain.
 
 **Chunk**:
-A group of changed files reviewed in one Brain call when the diffs alone do not fit one Brain's budget. A Review has at most three; each walks the Fallback chain on its own, and their Findings are merged.
+A group of changed files reviewed in one Brain call when the diffs alone do not fit one Brain's budget. A Review has at most three; each walks the Fallback chain on its own, and their Findings are merged. A Chunk tries Brains that fit it whole first (ADR-0008). Files of a Chunk no Brain could review are reported as not reviewed, and the Summary states how many changed files were reviewed.

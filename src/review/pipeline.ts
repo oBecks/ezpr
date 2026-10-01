@@ -14,7 +14,7 @@ import type { Finding } from '../prompt/schema';
 import type { ChainFailure } from '../providers/chain';
 import type { Brain } from '../providers/types';
 import type { Publish } from '../render/publish';
-import { renderReview } from '../render/summary';
+import { renderNothingToReview, renderReview } from '../render/summary';
 import { reviewInChunks, type ChunkedResult } from './chunks';
 import { postInlineFindings } from './inline';
 import type { Selection } from './select';
@@ -39,6 +39,7 @@ interface Setup {
   ignored: (path: string) => boolean;
   prep: Prepared;
   read: Read;
+  hasRules: boolean;
 }
 
 /** Reads each repo file at most once per run. */
@@ -72,16 +73,32 @@ function logFailures(failures: ChainFailure[]): void {
   }
 }
 
-/** Null when there is nothing to review. */
-async function setUp(job: ReviewJob): Promise<Setup | null> {
+async function setUp(job: ReviewJob, primary: Brain): Promise<Setup> {
   const { octokit, repo, pr } = job.gh;
   const ignored = makeIgnore(parseIgnore(core.getInput('ignore')));
   const read = cached(fileReader(octokit, pr));
   // Project rules come from the base branch so a PR cannot rewrite its own rules (ADR-0006).
-  const system = buildSystemPrompt(await loadRules(readerAt(octokit, repo, pr.baseSha)));
+  const rules = await loadRules(readerAt(octokit, repo, pr.baseSha));
+  const system = buildSystemPrompt(rules);
   const prep = await prepareFiles(job.selection.files, read, ignored);
-  const primary = job.brains[0];
-  return primary && prep.candidates.length > 0 ? { primary, system, ignored, prep, read } : null;
+  return { primary, system, ignored, prep, read, hasRules: Boolean(rules) };
+}
+
+/** One line in the job log saying what the Brains were given, so a run can be checked. */
+function logContext(setup: Setup, done: ChunkedResult, hasCheckout: boolean): void {
+  const { ctx } = done;
+  const skipped = [
+    `${ctx.skippedIgnored.length} ignored`,
+    `${ctx.skippedNoise.length} generated/binary`,
+    `${ctx.skippedSecrets.length} secret-like`,
+    `${ctx.missingPatch.length} without diff`,
+  ].join(', ');
+  core.info(
+    `Context sent: ${ctx.files.length} file(s), ${ctx.imports.length} imported file(s), ` +
+      `${ctx.callers.length} caller snippet(s); project rules: ${setup.hasRules ? 'yes' : 'no'}; ` +
+      `repo checkout: ${hasCheckout ? 'yes' : 'no'}; parts: ${done.parts}/${done.plannedParts}; ` +
+      `skipped: ${skipped}.`,
+  );
 }
 
 /** Imported files and Caller snippets for a chunk; a failure only loses the extra context. */
@@ -135,6 +152,9 @@ async function publishReview(
     inline,
     since: job.selection.since,
     parts: done.parts,
+    plannedParts: done.plannedParts,
+    unreviewed: done.unreviewed,
+    used: done.used,
     noCheckout,
   });
   if (pr.isFork) return job.publish(content);
@@ -142,15 +162,33 @@ async function publishReview(
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
 
+/**
+ * Says so when no file could be sent, instead of leaving the PR with no sign of EzPR. A PR that
+ * already has a Review keeps it: a push touching only skipped files is not worth replacing it.
+ */
+async function publishNothing(job: ReviewJob, prep: Prepared): Promise<void> {
+  core.info('No reviewable files in this PR.');
+  if (job.previous?.sha) return;
+  const content = renderNothingToReview(prep, job.selection.files.length);
+  if (job.gh.pr.isFork) return job.publish(content);
+  const { octokit, repo, pr } = job.gh;
+  const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
+  await writeSticky(octokit, repo, pr.number, job.existing, body);
+}
+
 /** Reviews the selected files and publishes the result. */
 export async function reviewPr(job: ReviewJob): Promise<void> {
-  const setup = await setUp(job);
+  const primary = job.brains[0];
+  if (!primary) return;
+  const setup = await setUp(job, primary);
+  if (setup.prep.candidates.length === 0) return publishNothing(job, setup.prep);
   const root = checkoutRoot(process.env);
-  const done = setup ? await reviewChunks(job, setup, root) : null;
+  const done = await reviewChunks(job, setup, root);
   if (!done) {
     core.info('No reviewable files in this PR.');
     return;
   }
+  logContext(setup, done, Boolean(root));
   logFailures(done.failures);
   await publishReview(job, done, !root);
 }

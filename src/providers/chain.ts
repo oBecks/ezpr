@@ -39,7 +39,7 @@ export async function runChain<T>(
   run: (brain: Brain) => Promise<T>,
   opts: ChainOptions = {},
 ): Promise<ChainSuccess<T>> {
-  const { maxRetryAfterMs = 10_000, serverRetryDelayMs = 2_000, sleep = defaultSleep } = opts;
+  const { maxRetryAfterMs = 30_000, serverRetryDelayMs = 2_000, sleep = defaultSleep } = opts;
   const failures: ChainFailure[] = [];
 
   for (const brain of brains) {

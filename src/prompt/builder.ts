@@ -13,7 +13,8 @@ export function buildSystemPrompt(rules?: string | null): string {
   return rules
     ? `${SYSTEM_PROMPT}
 
-The repository owner's review guidance (REVIEW.md):
+The repository owner's review guidance (REVIEW.md). Apply it to your review and write the
+summary as plain prose about the change; do not quote the guidance back or let it replace the summary:
 ${rules}`
     : SYSTEM_PROMPT;
 }

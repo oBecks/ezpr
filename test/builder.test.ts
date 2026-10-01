@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context/collect';
 import { buildPrompt, buildSystemPrompt, SYSTEM_PROMPT } from '../src/prompt/builder';
 
-const prep = { skippedNoise: [], skippedSecrets: [] };
+const prep = { skippedNoise: [], skippedSecrets: [], skippedIgnored: [], missingPatch: [] };
 const file = { path: 'a.ts', status: 'modified', patch: '+x' };
 
 describe('buildSystemPrompt', () => {

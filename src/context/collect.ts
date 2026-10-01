@@ -16,6 +16,10 @@ export interface Context {
   imports: ImportedFile[];
   skippedNoise: string[];
   skippedSecrets: string[];
+  /** Files matched by the `ignore` input. */
+  skippedIgnored: string[];
+  /** Files GitHub sent no diff for (too large to include). */
+  missingPatch: string[];
   droppedDiffs: string[];
   droppedContents: string[];
   droppedCallers: number;
@@ -29,6 +33,8 @@ export interface Prepared {
   candidates: FileEntry[];
   skippedNoise: string[];
   skippedSecrets: string[];
+  skippedIgnored: string[];
+  missingPatch: string[];
 }
 
 /** Filters and redacts the changed files; independent of any Brain's budget. */
@@ -39,6 +45,8 @@ export async function prepareFiles(
 ): Promise<Prepared> {
   const skippedNoise: string[] = [];
   const skippedSecrets: string[] = [];
+  const skippedIgnored: string[] = [];
+  const missingPatch: string[] = [];
   const candidates: FileEntry[] = [];
 
   for (const f of raw) {
@@ -47,8 +55,16 @@ export async function prepareFiles(
       skippedSecrets.push(f.path);
       continue;
     }
-    if (reason === 'noise' || ignored(f.path) || !f.patch) {
+    if (reason === 'noise') {
       skippedNoise.push(f.path);
+      continue;
+    }
+    if (ignored(f.path)) {
+      skippedIgnored.push(f.path);
+      continue;
+    }
+    if (!f.patch) {
+      missingPatch.push(f.path);
       continue;
     }
     const content = f.status === 'removed' ? null : await readFile(f.path);
@@ -59,12 +75,12 @@ export async function prepareFiles(
       content: content !== null && content.length <= MAX_FILE_CHARS ? redact(content) : undefined,
     });
   }
-  return { candidates, skippedNoise, skippedSecrets };
+  return { candidates, skippedNoise, skippedSecrets, skippedIgnored, missingPatch };
 }
 
 /** Fits `files` (a chunk of the prepared candidates) and extras to one Brain's budget. */
 export function buildContext(
-  prepared: Pick<Prepared, 'skippedNoise' | 'skippedSecrets'>,
+  prepared: Omit<Prepared, 'candidates'>,
   files: FileEntry[],
   budgetTokens: number,
   extras: Extras = {},
@@ -76,6 +92,8 @@ export function buildContext(
     imports: fitted.imports,
     skippedNoise: prepared.skippedNoise,
     skippedSecrets: prepared.skippedSecrets,
+    skippedIgnored: prepared.skippedIgnored,
+    missingPatch: prepared.missingPatch,
     droppedDiffs: fitted.droppedDiffs,
     droppedContents: fitted.droppedContents,
     droppedCallers: fitted.droppedCallers,

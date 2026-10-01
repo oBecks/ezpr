@@ -1,4 +1,4 @@
-import type { FileEntry } from '../context/budget';
+import { diffCost, type FileEntry } from '../context/budget';
 import { mergeReviews } from '../context/chunk';
 import { buildContext, type Context, type Prepared } from '../context/collect';
 import type { Extras } from '../context/budget';
@@ -28,7 +28,11 @@ export interface ChunkedResult {
   /** Ids of the Brains that wrote a part, in order, without repeats. */
   used: string[];
   failures: ChainFailure[];
+  /** Parts that produced a Review, and parts planned. */
   parts: number;
+  plannedParts: number;
+  /** Files of parts that no Brain could review. Distinct from files trimmed to fit a budget. */
+  unreviewed: string[];
 }
 
 interface Part {
@@ -37,13 +41,24 @@ interface Part {
   brain: string;
 }
 
+/**
+ * Chunks are sized for the first Brain, so a smaller fallback Brain would have to drop files.
+ * Brains that can take the whole chunk go first (keeping their order); the smaller ones stay
+ * as a last resort so a part is trimmed rather than lost.
+ */
+export function orderForChunk(brains: Brain[], chunk: FileEntry[], reserved: number): Brain[] {
+  const need = chunk.reduce((n, f) => n + diffCost(f), 0);
+  const fits = (b: Brain) => b.maxInputTokens - reserved >= need;
+  return [...brains.filter(fits), ...brains.filter((b) => !fits(b))];
+}
+
 async function reviewPart(
   input: ChunkedInput,
   chunk: FileEntry[],
   failures: ChainFailure[],
 ): Promise<Part | null> {
   const extras = await input.gather(chunk);
-  const done = await runChain(input.brains, async (b) => {
+  const done = await runChain(orderForChunk(input.brains, chunk, input.reserved), async (b) => {
     // Each Brain gets Context trimmed to its own budget.
     const ctx = buildContext(input.prep, chunk, b.maxInputTokens - input.reserved, extras);
     if (ctx.files.length === 0) return null;
@@ -54,7 +69,7 @@ async function reviewPart(
   return done.result ? { ...done.result, brain: done.brain.id } : null;
 }
 
-/** The first part failing is a failed Review; a later part is reported as left out. */
+/** The first part failing is a failed Review; a later part is reported as not reviewed. */
 async function tryPart(
   input: ChunkedInput,
   chunk: FileEntry[],
@@ -88,11 +103,11 @@ function mergeContexts(prep: Prepared, ctxs: Context[], droppedDiffs: string[]):
 export async function reviewInChunks(input: ChunkedInput): Promise<ChunkedResult | null> {
   const failures: ChainFailure[] = [];
   const parts: Part[] = [];
-  const dropped = [...input.droppedDiffs];
+  const unreviewed: string[] = [];
   for (const [index, chunk] of input.chunks.entries()) {
     const part = await tryPart(input, chunk, index, failures);
     if (part) parts.push(part);
-    else dropped.push(...chunk.map((f) => f.path));
+    else unreviewed.push(...chunk.map((f) => f.path));
   }
   if (parts.length === 0) return null;
   return {
@@ -100,10 +115,12 @@ export async function reviewInChunks(input: ChunkedInput): Promise<ChunkedResult
     ctx: mergeContexts(
       input.prep,
       parts.map((p) => p.ctx),
-      dropped,
+      input.droppedDiffs,
     ),
     used: [...new Set(parts.map((p) => p.brain))],
     failures,
     parts: parts.length,
+    plannedParts: input.chunks.length,
+    unreviewed,
   };
 }

@@ -27,6 +27,15 @@ function retryAfterMs(headers: Record<string, string> | undefined): number | und
   return undefined;
 }
 
+/** Google reports the wait in the error body ("Please retry in 25.5s"), not in a header. */
+function retryAfterFromMessage(message: string): number | undefined {
+  const m = /retry in (\d+(?:\.\d+)?)\s*(ms|s)(?![a-z])/i.exec(message);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.ceil(m[2]?.toLowerCase() === 'ms' ? n : n * 1000);
+}
+
 /** Some providers (Google) answer a bad key with 400 instead of 401. */
 const BAD_KEY =
   /api[ _-]?key.*(invalid|not valid|incorrect)|invalid.*api[ _-]?key|incorrect api key/i;
@@ -40,7 +49,11 @@ export function classify(err: unknown): Classified {
   if (APICallError.isInstance(err)) {
     const status = err.statusCode;
     if (status === 429) {
-      return { kind: 'rate-limit', message, retryAfterMs: retryAfterMs(err.responseHeaders) };
+      return {
+        kind: 'rate-limit',
+        message,
+        retryAfterMs: retryAfterMs(err.responseHeaders) ?? retryAfterFromMessage(message),
+      };
     }
     if (status === 401 || status === 403 || (status === 400 && BAD_KEY.test(message))) {
       return { kind: 'auth', message };

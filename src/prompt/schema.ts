@@ -14,3 +14,11 @@ export const ReviewSchema = z.object({
 
 export type Finding = z.infer<typeof FindingSchema>;
 export type Review = z.infer<typeof ReviewSchema>;
+
+/**
+ * For models that cannot enforce the schema themselves (OpenRouter, custom endpoints) the SDK
+ * sends no schema at all, so the shape goes into the system prompt.
+ */
+export const JSON_SHAPE_INSTRUCTION = `Reply with a single JSON object and nothing else, shaped exactly like:
+{"summary": string, "findings": [{"file": string, "line": number, "severity": "critical" | "high" | "medium" | "low", "message": string}]}
+Use an empty findings array when there is nothing to report.`;

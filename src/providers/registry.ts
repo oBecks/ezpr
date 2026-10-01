@@ -66,6 +66,7 @@ function fromDefaults(env: Env, def: ProviderDefaults): Brain | null {
     modelName: model,
     maxInputTokens: def.maxInputTokens,
     model: languageModel(def.id, apiKey, model),
+    structuredOutputs: def.id !== 'openrouter',
   });
 }
 
@@ -80,6 +81,7 @@ function customBrain(env: Env): Brain | null {
     modelName: model,
     maxInputTokens: Number.isFinite(max) && max > 0 ? max : CUSTOM_MAX_INPUT_TOKENS,
     model: languageModel('custom', read(env, 'EZPR_API_KEY'), model, baseURL),
+    structuredOutputs: false,
   });
 }
 

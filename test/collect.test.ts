@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectContext } from '../src/context/collect';
+import { collectContext, prepareFiles } from '../src/context/collect';
 
 describe('collectContext', () => {
   it('skips noise and secrets, redacts content, and reads files at head', async () => {
@@ -33,5 +33,22 @@ describe('collectContext', () => {
     );
     expect(reads).toBe(0);
     expect(ctx.files[0]?.content).toBeUndefined();
+  });
+
+  it('tells ignored files and files without a diff apart from generated ones', async () => {
+    const prepared = await prepareFiles(
+      [
+        { path: 'src/a.ts', status: 'modified', patch: '@@ +x' },
+        { path: 'src/secret-notes.ts', status: 'added', patch: '@@ +y' },
+        { path: 'src/huge.ts', status: 'added' },
+        { path: 'package-lock.json', status: 'modified', patch: '@@' },
+      ],
+      async () => null,
+      (p) => p.startsWith('src/secret-'),
+    );
+    expect(prepared.candidates.map((f) => f.path)).toEqual(['src/a.ts']);
+    expect(prepared.skippedIgnored).toEqual(['src/secret-notes.ts']);
+    expect(prepared.missingPatch).toEqual(['src/huge.ts']);
+    expect(prepared.skippedNoise).toEqual(['package-lock.json']);
   });
 });

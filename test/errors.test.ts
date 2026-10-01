@@ -47,6 +47,17 @@ describe('classify', () => {
     expect(classify(http(429)).retryAfterMs).toBeUndefined();
   });
 
+  it('reads the wait from the error text when there is no header (Google style)', () => {
+    const msg = 'You exceeded your current quota. Please retry in 25.586407951s.';
+    expect(classify(http(429, msg)).retryAfterMs).toBe(25_587);
+    expect(classify(http(429, 'retry in 300ms')).retryAfterMs).toBe(300);
+    expect(classify(http(429, 'try again later')).retryAfterMs).toBeUndefined();
+  });
+
+  it('prefers the Retry-After header over the error text', () => {
+    expect(classify(http(429, 'retry in 25s', { 'retry-after': '2' })).retryAfterMs).toBe(2000);
+  });
+
   it('recognises timeouts and fetch failures', () => {
     const t = new Error('t');
     t.name = 'TimeoutError';
