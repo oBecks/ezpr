@@ -150,7 +150,7 @@ export function renderSetupComment(): string {
     'No model credentials were found, so no review was run.',
     '',
     '1. Create a free key at https://aistudio.google.com/apikey',
-    '2. Add it as a repository secret named `GEMINI_API_KEY` (Settings → Secrets and variables → Actions). OpenRouter, Groq, Anthropic and OpenAI keys work too: `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`.',
+    '2. Add it as a repository secret named `GEMINI_API_KEY` (Settings → Secrets and variables → Actions). OpenRouter, Groq, Mistral, Anthropic and OpenAI keys work too: `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`.',
     '3. Pass it to the action:',
     '',
     '```yaml',

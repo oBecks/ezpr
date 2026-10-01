@@ -6,6 +6,7 @@ import type { LanguageModel } from 'ai';
 import {
   CUSTOM_MAX_INPUT_TOKENS,
   GROQ_BASE_URL,
+  MISTRAL_BASE_URL,
   OPENROUTER_BASE_URL,
   PROVIDER_ORDER,
   type ProviderDefaults,
@@ -40,6 +41,13 @@ function languageModel(
         apiKey,
         supportsStructuredOutputs: true,
       })(model);
+    case 'mistral':
+      return createOpenAICompatible({
+        name: 'mistral',
+        baseURL: MISTRAL_BASE_URL,
+        apiKey,
+        supportsStructuredOutputs: false,
+      })(model);
     case 'openrouter':
       return createOpenAICompatible({
         name: 'openrouter',
@@ -66,7 +74,7 @@ function fromDefaults(env: Env, def: ProviderDefaults): Brain | null {
     modelName: model,
     maxInputTokens: def.maxInputTokens,
     model: languageModel(def.id, apiKey, model),
-    structuredOutputs: def.id !== 'openrouter',
+    structuredOutputs: def.id !== 'openrouter' && def.id !== 'mistral',
   });
 }
 

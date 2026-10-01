@@ -32581,6 +32581,12 @@ var PROVIDER_ORDER = [
   },
   { id: "groq", envKey: "GROQ_API_KEY", model: "openai/gpt-oss-120b", maxInputTokens: 1e5 },
   {
+    id: "mistral",
+    envKey: "MISTRAL_API_KEY",
+    model: "mistral-small-latest",
+    maxInputTokens: 1e5
+  },
+  {
     id: "anthropic",
     envKey: "ANTHROPIC_API_KEY",
     model: "claude-sonnet-5-5",
@@ -32590,6 +32596,7 @@ var PROVIDER_ORDER = [
 ];
 var OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 var GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+var MISTRAL_BASE_URL = "https://api.mistral.ai/v1";
 var CUSTOM_MAX_INPUT_TOKENS = 32e3;
 var SUMMARY_MARKER_PREFIX = "<!-- ezpr:summary";
 var SUMMARY_MARKER = `${SUMMARY_MARKER_PREFIX} -->`;
@@ -90037,6 +90044,13 @@ function languageModel(id, apiKey, model, baseURL) {
         apiKey,
         supportsStructuredOutputs: true
       })(model);
+    case "mistral":
+      return createOpenAICompatible({
+        name: "mistral",
+        baseURL: MISTRAL_BASE_URL,
+        apiKey,
+        supportsStructuredOutputs: false
+      })(model);
     case "openrouter":
       return createOpenAICompatible({
         name: "openrouter",
@@ -90062,7 +90076,7 @@ function fromDefaults(env, def) {
     modelName: model,
     maxInputTokens: def.maxInputTokens,
     model: languageModel(def.id, apiKey, model),
-    structuredOutputs: def.id !== "openrouter"
+    structuredOutputs: def.id !== "openrouter" && def.id !== "mistral"
   });
 }
 function customBrain(env) {
@@ -90391,7 +90405,7 @@ function renderSetupComment() {
     "No model credentials were found, so no review was run.",
     "",
     "1. Create a free key at https://aistudio.google.com/apikey",
-    "2. Add it as a repository secret named `GEMINI_API_KEY` (Settings \u2192 Secrets and variables \u2192 Actions). OpenRouter, Groq, Anthropic and OpenAI keys work too: `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`.",
+    "2. Add it as a repository secret named `GEMINI_API_KEY` (Settings \u2192 Secrets and variables \u2192 Actions). OpenRouter, Groq, Mistral, Anthropic and OpenAI keys work too: `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`.",
     "3. Pass it to the action:",
     "",
     "```yaml",

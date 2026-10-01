@@ -58,6 +58,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
@@ -99,6 +100,7 @@ order and moves to the next on rate limits (429), server errors, timeouts or inv
 | Gemini                   | `GEMINI_API_KEY`                                       | `gemini-3.5-flash-lite` |
 | OpenRouter               | `OPENROUTER_API_KEY`                                   | `openrouter/free`       |
 | Groq                     | `GROQ_API_KEY`                                         | `openai/gpt-oss-120b`   |
+| Mistral                  | `MISTRAL_API_KEY`                                      | `mistral-small-latest`  |
 | Anthropic                | `ANTHROPIC_API_KEY`                                    | `claude-sonnet-5-5`     |
 | OpenAI                   | `OPENAI_API_KEY`                                       | `gpt-6.1-sol`           |
 | Custom OpenAI-compatible | `EZPR_BASE_URL`, `EZPR_MODEL`, optional `EZPR_API_KEY` | yours                   |
@@ -145,7 +147,7 @@ ignore:
   - '*.generated.ts'
 ```
 
-- `brains` takes `gemini`, `openrouter`, `groq`, `anthropic`, `openai` and `custom`. A listed
+- `brains` takes `gemini`, `openrouter`, `groq`, `mistral`, `anthropic`, `openai` and `custom`. A listed
   provider without an API key is skipped.
 - `strictness` changes how picky the review is and which Findings become inline comments:
   `chill` only `high` and above, `balanced` (default) `medium` and above, `strict` all.
@@ -156,7 +158,7 @@ ignore:
 ## Privacy
 
 Free API tiers can use submitted code to improve the provider's models, and terms differ per
-provider and change over time. Read the terms of the provider you use before sending a private
+provider and change over time. Mistral's free tier, for one, requires you to opt in to training on your data. Read the terms of the provider you use before sending a private
 repository's code to it. EzPR skips secret-like files (`.env`, keys) and redacts common secret
 formats before sending anything. The diff, the changed files and the files they import are
 sent to the provider.

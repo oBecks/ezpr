@@ -14,11 +14,13 @@ describe('buildBrains', () => {
       GEMINI_API_KEY: 'k',
       ANTHROPIC_API_KEY: 'a',
       OPENROUTER_API_KEY: 'r',
+      MISTRAL_API_KEY: 'm',
     });
     expect(brains.map((b) => b.provider)).toEqual([
       'gemini',
       'openrouter',
       'groq',
+      'mistral',
       'anthropic',
       'openai',
     ]);

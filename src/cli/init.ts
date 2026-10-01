@@ -114,6 +114,7 @@ async function acceptsDataUse(io: InitIo, provider: MenuProvider): Promise<boole
   if (!provider.free) return true;
   io.log('');
   io.log(FREE_TIER_WARNING);
+  if (provider.extraWarning) io.log(provider.extraWarning);
   return isYes(await io.ask('Continue? [Y/n] '));
 }
 

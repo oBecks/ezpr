@@ -76,6 +76,7 @@ describe('provider menu', () => {
       'gemini',
       'openrouter',
       'groq',
+      'mistral',
       'anthropic',
       'openai',
     ]);
@@ -83,7 +84,7 @@ describe('provider menu', () => {
 
   it('marks the free tiers, which are the ones that get the warning', () => {
     const free = MENU_PROVIDERS.filter((p) => p.free).map((p) => p.id);
-    expect(free).toEqual(['gemini', 'openrouter', 'groq']);
+    expect(free).toEqual(['gemini', 'openrouter', 'groq', 'mistral']);
   });
 });
 
@@ -120,7 +121,7 @@ describe('runInit', () => {
   });
 
   it('does not warn for a paid provider', async () => {
-    const f = fake({ answers: ['4'], key: 'k' });
+    const f = fake({ answers: ['5'], key: 'k' });
     expect(await runInit(base, f.io)).toBe(0);
     expect(f.logs.join('\n')).not.toContain(FREE_TIER_WARNING);
     expect(f.secrets[0]?.name).toBe('ANTHROPIC_API_KEY');
@@ -176,5 +177,14 @@ describe('runInit', () => {
     const f = fake({ answers: ['', ''], key: 'k' });
     await runInit({ ...base, noOpen: true }, f.io);
     expect(f.opened).toEqual([]);
+  });
+});
+
+describe('Mistral in init', () => {
+  it('adds its own warning on top of the free-tier one', async () => {
+    const f = fake({ answers: ['4', ''], key: 'k' });
+    expect(await runInit(base, f.io)).toBe(0);
+    expect(f.logs.join('\n')).toContain('opt in to your data being used for training');
+    expect(f.secrets[0]?.name).toBe('MISTRAL_API_KEY');
   });
 });
