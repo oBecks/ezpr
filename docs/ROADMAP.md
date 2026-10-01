@@ -46,7 +46,7 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 - Invalid keys are skipped one by one and named in the Summary; the rest of the file still applies. Parsed with `yaml` and zod.
 - Helpful comments: no keys (Setup comment), all Brains failed (each failure with a fix), PR too large (counts and tips; a partial review gets the tips line). A PR that already has a Review keeps it when a later run fails or finds nothing.
 
-## Phase 6: Commands, CLI, release
+## Phase 6: Commands, CLI, release (code done; tag, npm publish and Marketplace listing pending)
 
 - Commands in the same workflow file: `pull_request`, `issue_comment` and `pull_request_review_comment`; the Action branches on the event. One shared gate (owner/member/collaborator only, others silently ignored) and one parser (line-start, first command only, quotes and code fences ignored). Works on fork PRs (ADR-0010). One concurrency group per comment (`ezpr-cmd-<comment id>`), so quick commands are never dropped; a Review merges in dismissals made while it ran. 👀 reaction on accept; usage reply on an unknown command (maintainers only).
 - `@ezpr review`: Forced Review of the whole PR (ignores the Reviewed SHA; Already commented lines still skipped).
@@ -54,7 +54,8 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 - `@ezpr ignore` (inline-thread reply): Dismissed finding keyed by file path plus the text of the line (not the message, which the model rewords on every run), stored in the Summary marker (max 50, oldest dropped). Replies "Dismissed", leaves the thread open. Path globs stay in `.ezpr.yml`.
 - CLI `@obecks/ezpr` (`ezpr` is taken on npm), `init` only: provider menu (Gemini default, OpenRouter, Groq, Anthropic, OpenAI; custom endpoint = "see README"), one provider per run, Y/n data-use warning for free-tier providers, hidden key prompt piped to `gh secret set` on stdin, writes the workflow (all five secrets in `env:`), shows a diff and refuses to overwrite without `--force`, manual-steps fallback without `gh`.
 - README polish (data-use callout in Setup), tag `v1.0.0` plus floating `v1`, README and `init` pin `@v1`, manual Marketplace release.
-- To verify while building: each provider's free-tier data-use claims; workflow permissions needed for reactions and replies.
+- Verified live on a throwaway PR: walkthrough, finding explanation, dismissal surviving a reworded rerun, usage reply, 👀 reactions. Found on the way: a shared command group dropped quick commands (now per comment), and a message-keyed dismissal let a reworded finding back in (now keyed by line text). `pull_request_review_comment` runs use the PR's merge ref, so thread commands run the PR's own copy of the workflow.
+- Still to verify: each provider's free-tier data-use claims (the README and `init` warning are worded as "may").
 
 ## Open questions
 
