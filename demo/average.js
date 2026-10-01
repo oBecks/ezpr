@@ -6,3 +6,12 @@ export function average(nums) {
   }
   return sum / nums.length;
 }
+
+// Returns the largest number in an array.
+export function max(nums) {
+  let best = 0;
+  for (const n of nums) {
+    if (n > best) best = n;
+  }
+  return best;
+}
