@@ -66,3 +66,15 @@ The repo's `.ezpr.yml`, read from the base branch like Project rules. Sets Brain
 
 **Too large**:
 A PR where size left no file reviewable. EzPR posts a dedicated comment with file and token counts and advice (split the PR, add ignore globs), instead of a Review.
+
+**Command**:
+A comment starting with `@ezpr` that a maintainer posts to steer EzPR: `review`, `explain` or `ignore`. Only authors associated as owner, member or collaborator can run one; anyone else is silently ignored. Works on Fork PRs too.
+
+**Forced Review**:
+What `@ezpr review` runs: a full Review of the whole pull request that ignores the Reviewed SHA. Already commented lines are still skipped.
+
+**Walkthrough**:
+What `@ezpr explain` posts on the pull request conversation: a plain-language account of what the pull request changes. Typed as a reply in an Inline comment thread, `explain` instead explains that one Finding.
+
+**Dismissed finding**:
+A Finding a maintainer silenced with `@ezpr ignore` in its Inline comment thread. It is never raised again. Remembered in the Summary's marker.

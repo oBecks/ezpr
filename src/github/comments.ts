@@ -122,3 +122,12 @@ export async function postInline(
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+const INLINE_BODY = /^\S+ \*\*(?:critical|high|medium|low)\*\* — ([\s\S]*)$/;
+
+/** The Finding message inside an EzPR inline comment; null when the comment is not one. */
+export function parseInlineBody(body: string): string | null {
+  if (!body.includes(INLINE_MARKER)) return null;
+  const text = body.replace(INLINE_MARKER, '').trim();
+  return INLINE_BODY.exec(text)?.[1]?.trim() ?? null;
+}

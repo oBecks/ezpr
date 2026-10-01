@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { SUMMARY_MARKER } from '../src/config';
-import { buildMarker, composeSticky, formatTime, parseSticky } from '../src/github/sticky';
+import { MAX_DISMISSED, SUMMARY_MARKER } from '../src/config';
+import {
+  addDismissed,
+  buildMarker,
+  composeSticky,
+  formatTime,
+  parseSticky,
+} from '../src/github/sticky';
 
 const SHA1 = 'a'.repeat(40);
 const SHA2 = 'b'.repeat(40);
@@ -75,5 +81,44 @@ describe('composeSticky', () => {
 describe('formatTime', () => {
   it('renders a short UTC label', () => {
     expect(formatTime(T2)).toBe('2026-10-01 11:30 UTC');
+  });
+});
+
+describe('dismissed findings in the marker', () => {
+  it('round-trips through the marker', () => {
+    const s = parseSticky(`${buildMarker(SHA1, T1, ['aaa111', 'bbb222'])}\nbody`);
+    expect(s.dismissed).toEqual(['aaa111', 'bbb222']);
+    expect(s.sha).toBe(SHA1);
+  });
+
+  it('is empty when the marker has none', () => {
+    expect(parseSticky(`${buildMarker(SHA1, T1)}\nbody`).dismissed).toEqual([]);
+  });
+
+  it('survives a new review', () => {
+    const previous = parseSticky(`${buildMarker(SHA1, T1, ['aaa111'])}\nold`);
+    const next = composeSticky(previous, 'new', SHA2, T2);
+    expect(parseSticky(next).dismissed).toEqual(['aaa111']);
+  });
+
+  it('addDismissed appends, ignores repeats, and caps the list', () => {
+    const body = `${buildMarker(SHA1, T1)}\nbody`;
+    const once = addDismissed(body, 'aaa111');
+    expect(parseSticky(once).dismissed).toEqual(['aaa111']);
+    expect(addDismissed(once, 'aaa111')).toBe(once);
+    let many = body;
+    for (let i = 0; i < MAX_DISMISSED + 5; i++)
+      many = addDismissed(many, i.toString(16).padStart(6, '0'));
+    const kept = parseSticky(many).dismissed;
+    expect(kept).toHaveLength(MAX_DISMISSED);
+    expect(kept.at(-1)).toBe((MAX_DISMISSED + 4).toString(16).padStart(6, '0'));
+  });
+
+  it('addDismissed works on a Summary with only the plain marker', () => {
+    const out = addDismissed(`${SUMMARY_MARKER}\n## EzPR needs an API key`, 'aaa111');
+    const s = parseSticky(out);
+    expect(s.dismissed).toEqual(['aaa111']);
+    expect(s.sha).toBeUndefined();
+    expect(s.latest).toBe('## EzPR needs an API key');
   });
 });

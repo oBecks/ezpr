@@ -11,7 +11,7 @@ import { selectFiles } from './select';
 import type { Repo } from './types';
 
 /** `.ezpr.yml` from the base branch (ADR-0009) merged with the action inputs. */
-async function loadSettings(octokit: Octokit, repo: Repo, baseSha: string) {
+export async function loadSettings(octokit: Octokit, repo: Repo, baseSha: string) {
   const file = parseConfigFile(await readerAt(octokit, repo, baseSha)(CONFIG_PATH));
   const input = parseInputs({
     ignore: core.getInput('ignore'),
@@ -21,13 +21,22 @@ async function loadSettings(octokit: Octokit, repo: Repo, baseSha: string) {
   return mergeSettings(file, input);
 }
 
+export interface ReviewOptions {
+  /** The run came from a Command, so the token can write even on a fork PR (ADR-0010). */
+  fromCommand?: boolean;
+  /** Review the whole PR even if the head commit was already reviewed (`@ezpr review`). */
+  force?: boolean;
+}
+
 export async function reviewPullRequest(
   octokit: Octokit,
   repo: Repo,
   number: number,
+  options: ReviewOptions = {},
 ): Promise<void> {
   const pr = await loadPr(octokit, repo, number);
-  const gh = { octokit, repo, pr };
+  const canComment = options.fromCommand === true || !pr.isFork;
+  const gh = { octokit, repo, pr, canComment };
   const publish = makePublisher(gh);
 
   const available = buildBrains(process.env);
@@ -36,7 +45,7 @@ export async function reviewPullRequest(
     return publish(renderSetupComment());
   }
 
-  const existing = pr.isFork ? undefined : await getSticky(octokit, repo, number);
+  const existing = canComment ? await getSticky(octokit, repo, number) : undefined;
   const previous = existing?.body ? parseSticky(existing.body) : undefined;
   const settings = await loadSettings(octokit, repo, pr.baseSha);
   for (const problem of settings.problems) core.warning(`Config: ${problem}`);
@@ -50,11 +59,21 @@ export async function reviewPullRequest(
   core.info(`Fallback chain: ${brains.map((b) => b.id).join(' -> ')}`);
 
   const all = await listChangedFiles(octokit, repo, number);
-  const selection = await selectFiles(gh, all, previous?.sha);
+  const selection = await selectFiles(gh, all, options.force ? undefined : previous?.sha);
   if (!selection) return;
 
   try {
-    await reviewPr({ gh, brains, all, selection, previous, existing, publish, settings });
+    await reviewPr({
+      gh,
+      brains,
+      all,
+      selection,
+      previous,
+      existing,
+      publish,
+      settings,
+      useCheckout: !options.fromCommand,
+    });
   } catch (err) {
     await publishFailure(publish, err, Boolean(previous?.sha));
   }

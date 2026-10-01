@@ -64,3 +64,7 @@ export const STRICTNESS_THRESHOLD: Record<Strictness, Severity> = {
 export const MAX_HISTORY = 10;
 /** A large PR is reviewed in at most this many Brain calls (Chunks). */
 export const MAX_CHUNKS = 3;
+/** Dismissed findings remembered in the Summary marker; the oldest are dropped past this. */
+export const MAX_DISMISSED = 50;
+/** Only these commenters may run a Command (GitHub's `author_association`). */
+export const COMMAND_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR'] as const;

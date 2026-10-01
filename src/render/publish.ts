@@ -10,7 +10,7 @@ export type Publish = (body: string) => Promise<void>;
 /** Fork PRs get a read-only token, so results go to the job summary (ADR-0004). */
 export function makePublisher(gh: Gh): Publish {
   return async (body) => {
-    if (!gh.pr.isFork) {
+    if (gh.canComment) {
       await upsertSummary(gh.octokit, gh.repo, gh.pr.number, body);
       return;
     }

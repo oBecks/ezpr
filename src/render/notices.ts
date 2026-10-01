@@ -55,3 +55,14 @@ export function renderErrorComment(message: string, failures: ChainFailure[] = [
     'The job log has details. Re-push or re-run the workflow to try again.',
   ].join('\n');
 }
+
+/** A Command that failed. Not a Summary, so no marker: it must never replace the sticky comment. */
+export function renderCommandError(what: string, message: string, failures: ChainFailure[] = []) {
+  return [
+    `EzPR could not ${what}.`,
+    '',
+    ...(failures.length
+      ? ['Every model failed:', '', ...renderFailureAdvice(failures)]
+      : [message]),
+  ].join('\n');
+}

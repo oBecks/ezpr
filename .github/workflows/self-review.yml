@@ -2,18 +2,26 @@ name: AI Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
 permissions:
   contents: read
   pull-requests: write
 concurrency:
-  group: ezpr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('ezpr-{0}', github.event.pull_request.number) || format('ezpr-cmd-{0}', github.event.issue.number || github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@ezpr')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@ezpr'))
     runs-on: ubuntu-latest
     steps:
-      # EzPR reviews its own PRs with the action built from the PR's own code.
+      # EzPR reviews its own PRs with the action built from the PR's own code. Comment events run
+      # from the default branch, so `uses: ./` there is the released code (and needs this checkout).
       - uses: actions/checkout@v4
       - uses: ./
         env:

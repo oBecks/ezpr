@@ -48,11 +48,14 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 
 ## Phase 6: Commands, CLI, release
 
-- `@ezpr review`, `@ezpr explain`, `@ezpr ignore` (separate `issue_comment` trigger).
-- `npx <name> init`: writes the workflow, opens the key signup page, runs `gh secret set`.
-- README polish (incl. free-tier data-use warning), Marketplace release.
+- Commands in the same workflow file: `pull_request`, `issue_comment` and `pull_request_review_comment`; the Action branches on the event. One shared gate (owner/member/collaborator only, others silently ignored) and one parser (line-start, first command only, quotes and code fences ignored). Works on fork PRs (ADR-0010). Own concurrency group `ezpr-cmd-<pr>`, no cancel. 👀 reaction on accept; usage reply on an unknown command (maintainers only).
+- `@ezpr review`: Forced Review of the whole PR (ignores the Reviewed SHA; Already commented lines still skipped).
+- `@ezpr explain`: Walkthrough on the PR conversation; in an inline thread, explains that Finding. No free-form questions in v1.
+- `@ezpr ignore` (inline-thread reply): Dismissed finding keyed by file path plus message hash, stored in the Summary marker (max 50, oldest dropped). Replies "Dismissed", leaves the thread open. Path globs stay in `.ezpr.yml`.
+- CLI `@obecks/ezpr` (`ezpr` is taken on npm), `init` only: provider menu (Gemini default, OpenRouter, Groq, Anthropic, OpenAI; custom endpoint = "see README"), one provider per run, Y/n data-use warning for free-tier providers, hidden key prompt piped to `gh secret set` on stdin, writes the workflow (all five secrets in `env:`), shows a diff and refuses to overwrite without `--force`, manual-steps fallback without `gh`.
+- README polish (data-use callout in Setup), tag `v1.0.0` plus floating `v1`, README and `init` pin `@v1`, manual Marketplace release.
+- To verify while building: each provider's free-tier data-use claims; workflow permissions needed for reactions and replies.
 
 ## Open questions
 
-- Phase 6: npm package name for the CLI; command trigger design.
 - Confirm Gemini free-tier limits and the default model name with a real call (docs list only AI Studio dashboard limits).

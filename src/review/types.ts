@@ -7,6 +7,11 @@ export interface Gh {
   octokit: Octokit;
   repo: Repo;
   pr: PrInfo;
+  /**
+   * False on a fork PR's `pull_request` run (read-only token, ADR-0004): the Review goes to the
+   * job summary. A Command run has a write token, so it can comment on fork PRs (ADR-0010).
+   */
+  canComment: boolean;
 }
 
 export const errorText = (err: unknown): string =>

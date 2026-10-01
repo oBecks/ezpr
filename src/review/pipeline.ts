@@ -17,6 +17,7 @@ import type { Brain } from '../providers/types';
 import type { Publish } from '../render/publish';
 import { renderTooLarge, withConfigProblems } from '../render/notices';
 import { renderNothingToReview, renderReview } from '../render/summary';
+import { withoutDismissed } from './dismissed';
 import { reviewInChunks, type ChunkedResult } from './chunks';
 import { postInlineFindings } from './inline';
 import type { Selection } from './select';
@@ -32,6 +33,8 @@ export interface ReviewJob {
   existing: Awaited<ReturnType<typeof getSticky>>;
   publish: Publish;
   settings: Settings;
+  /** Look for the repo checkout; false for Command runs, whose checkout is not the PR. */
+  useCheckout: boolean;
 }
 
 type Read = (path: string) => Promise<string | null>;
@@ -148,15 +151,20 @@ async function publishReview(
   noCheckout: boolean,
 ): Promise<void> {
   const { octokit, repo, pr } = job.gh;
-  const inline = pr.isFork
-    ? new Set<Finding>()
-    : await postInlineFindings(
+  // Findings a maintainer dismissed with `@ezpr ignore` are not raised again.
+  const review = {
+    ...done.review,
+    findings: withoutDismissed(done.review.findings, job.previous?.dismissed ?? []),
+  };
+  const inline = job.gh.canComment
+    ? await postInlineFindings(
         job.gh,
         job.all,
-        done.review.findings,
+        review.findings,
         STRICTNESS_THRESHOLD[job.settings.strictness],
-      );
-  const content = renderReview(done.review, done.used.join(', '), done.ctx, dedupe(done.failures), {
+      )
+    : new Set<Finding>();
+  const content = renderReview(review, done.used.join(', '), done.ctx, dedupe(done.failures), {
     inline,
     since: job.selection.since,
     parts: done.parts,
@@ -166,7 +174,7 @@ async function publishReview(
     noCheckout,
     configProblems: job.settings.problems,
   });
-  if (pr.isFork) return job.publish(content);
+  if (!job.gh.canComment) return job.publish(content);
   const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
@@ -187,7 +195,7 @@ async function publishNothing(job: ReviewJob, prep: Prepared): Promise<void> {
 
 /** Publishes a Summary that is not a Review of the diff (nothing reviewed, or too large). */
 async function publishStandalone(job: ReviewJob, content: string): Promise<void> {
-  if (job.gh.pr.isFork) return job.publish(content);
+  if (!job.gh.canComment) return job.publish(content);
   const { octokit, repo, pr } = job.gh;
   const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
   await writeSticky(octokit, repo, pr.number, job.existing, body);
@@ -199,7 +207,7 @@ export async function reviewPr(job: ReviewJob): Promise<void> {
   if (!primary) return;
   const setup = await setUp(job, primary);
   if (setup.prep.candidates.length === 0) return publishNothing(job, setup.prep);
-  const root = checkoutRoot(process.env);
+  const root = job.useCheckout ? checkoutRoot(process.env) : undefined;
   const done = await reviewChunks(job, setup, root);
   if (!done) {
     // Every diff was larger than one whole call. A PR that already has a Review keeps it.
@@ -214,5 +222,5 @@ export async function reviewPr(job: ReviewJob): Promise<void> {
   }
   logContext(setup, done, Boolean(root));
   logFailures(done.failures);
-  await publishReview(job, done, !root);
+  await publishReview(job, done, job.useCheckout && !root);
 }

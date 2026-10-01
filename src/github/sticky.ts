@@ -1,4 +1,4 @@
-import { MAX_HISTORY, SUMMARY_MARKER_PREFIX } from '../config';
+import { MAX_DISMISSED, MAX_HISTORY, SUMMARY_MARKER_PREFIX } from '../config';
 
 export interface HistoryEntry {
   sha: string;
@@ -13,17 +13,34 @@ export interface StickyState {
   /** Latest Review text, without the marker. */
   latest: string;
   history: HistoryEntry[];
+  /** Keys of Findings a maintainer dismissed with `@ezpr ignore`; never raised again. */
+  dismissed: string[];
 }
 
 const MARKER = new RegExp(
-  String.raw`^${SUMMARY_MARKER_PREFIX}(?: sha=([0-9a-f]{7,40}))?(?: at=(\S+))? -->`,
+  String.raw`^${SUMMARY_MARKER_PREFIX}(?: sha=([0-9a-f]{7,40}))?(?: at=(\S+))?(?: dismissed=([0-9a-f,]+))? -->`,
 );
 const HISTORY_MARK = '<!-- ezpr:history -->';
 const ENTRY =
   /<!-- ezpr:entry sha=(\S+) at=(\S+) -->\n<details>\n<summary>[^\n]*<\/summary>\n\n([\s\S]*?)\n\n<\/details>\n<!-- \/ezpr:entry -->/g;
 
-export function buildMarker(sha: string, at: string): string {
-  return `${SUMMARY_MARKER_PREFIX} sha=${sha} at=${at} -->`;
+export interface MarkerFields {
+  sha?: string;
+  at?: string;
+  dismissed?: string[];
+}
+
+export function markerLine({ sha, at, dismissed = [] }: MarkerFields): string {
+  const fields = [
+    sha ? ` sha=${sha}` : '',
+    at ? ` at=${at}` : '',
+    dismissed.length ? ` dismissed=${dismissed.join(',')}` : '',
+  ];
+  return `${SUMMARY_MARKER_PREFIX}${fields.join('')} -->`;
+}
+
+export function buildMarker(sha: string, at: string, dismissed: string[] = []): string {
+  return markerLine({ sha, at, dismissed });
 }
 
 export function formatTime(iso: string): string {
@@ -46,7 +63,8 @@ export function parseSticky(body: string): StickyState {
     at: m[2] ?? '',
     body: m[3] ?? '',
   }));
-  return { sha: marker?.[1], at: marker?.[2], latest, history };
+  const dismissed = marker?.[3]?.split(',').filter(Boolean) ?? [];
+  return { sha: marker?.[1], at: marker?.[2], latest, history, dismissed };
 }
 
 function renderEntry(e: HistoryEntry): string {
@@ -77,7 +95,7 @@ export function composeSticky(
     history.unshift({ sha: previous.sha, at: previous.at, body: previous.latest });
   }
   const kept = history.slice(0, MAX_HISTORY);
-  const parts = [buildMarker(sha, at), latest];
+  const parts = [buildMarker(sha, at, previous?.dismissed), latest];
   if (kept.length) {
     parts.push(
       '',
@@ -91,4 +109,14 @@ export function composeSticky(
     );
   }
   return parts.join('\n');
+}
+
+/** Records a dismissed Finding in the marker of an existing Summary body. Newest last, capped. */
+export function addDismissed(body: string, key: string): string {
+  const state = parseSticky(body);
+  if (state.dismissed.includes(key)) return body;
+  const dismissed = [...state.dismissed, key].slice(-MAX_DISMISSED);
+  const firstLine = body.split('\n', 1)[0] ?? '';
+  const rest = MARKER.test(firstLine) ? body.slice(firstLine.length) : `\n${body}`;
+  return markerLine({ sha: state.sha, at: state.at, dismissed }) + rest;
 }

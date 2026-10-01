@@ -1,7 +1,6 @@
 {
-  "name": "ezpr",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@obecks/ezpr",
+  "version": "1.0.0",
   "description": "Free, open-source AI pull request reviewer GitHub Action",
   "license": "MIT",
   "type": "module",
@@ -11,27 +10,41 @@
     "lint": "eslint src test",
     "format": "prettier --write .",
     "test": "vitest run",
-    "check": "eslint . && prettier --check . && tsc --noEmit && vitest run"
+    "check": "eslint . && prettier --check . && tsc --noEmit && vitest run",
+    "prepublishOnly": "npm run build"
   },
-  "dependencies": {
+  "devDependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
     "@ai-sdk/anthropic": "^4.0.71",
     "@ai-sdk/google": "^4.0.87",
     "@ai-sdk/openai": "^4.0.83",
     "@ai-sdk/openai-compatible": "^3.0.62",
-    "ai": "^7.0.126",
-    "yaml": "^2.9.1",
-    "zod": "^4.6.5"
-  },
-  "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.3",
+    "ai": "^7.0.126",
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "prettier": "^3.9.9",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.0",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "bin": {
+    "ezpr": "cli/ezpr.cjs"
+  },
+  "files": [
+    "cli",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oBecks/ezpr.git"
   }
 }
