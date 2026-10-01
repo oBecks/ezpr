@@ -1,4 +1,4 @@
-export type ProviderId = 'gemini' | 'openrouter' | 'groq' | 'anthropic' | 'openai' | 'custom';
+﻿export type ProviderId = 'gemini' | 'openrouter' | 'groq' | 'anthropic' | 'openai' | 'custom';
 
 export interface ProviderDefaults {
   id: ProviderId;
@@ -12,7 +12,12 @@ export interface ProviderDefaults {
 
 /** Default fallback order. Free tiers first, paid next, user-supplied endpoint last. */
 export const PROVIDER_ORDER: ProviderDefaults[] = [
-  { id: 'gemini', envKey: 'GEMINI_API_KEY', model: 'gemini-3.5-flash', maxInputTokens: 100_000 },
+  {
+    id: 'gemini',
+    envKey: 'GEMINI_API_KEY',
+    model: 'gemini-3.5-flash-lite',
+    maxInputTokens: 100_000,
+  },
   {
     id: 'openrouter',
     envKey: 'OPENROUTER_API_KEY',

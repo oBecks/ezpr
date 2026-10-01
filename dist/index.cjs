@@ -25306,7 +25306,12 @@ async function collectContext(raw, readFile, budgetTokens) {
 
 // src/config.ts
 var PROVIDER_ORDER = [
-  { id: "gemini", envKey: "GEMINI_API_KEY", model: "gemini-3.5-flash", maxInputTokens: 1e5 },
+  {
+    id: "gemini",
+    envKey: "GEMINI_API_KEY",
+    model: "gemini-3.5-flash-lite",
+    maxInputTokens: 1e5
+  },
   {
     id: "openrouter",
     envKey: "OPENROUTER_API_KEY",

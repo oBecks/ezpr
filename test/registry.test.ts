@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { buildBrains } from '../src/providers/registry';
 
 describe('buildBrains', () => {
@@ -32,7 +32,7 @@ describe('buildBrains', () => {
       EZPR_MODEL: 'llama3',
       EZPR_MAX_INPUT_TOKENS: '8000',
     });
-    expect(brains.map((b) => b.id)).toEqual(['gemini/gemini-3.5-flash', 'custom/llama3']);
+    expect(brains.map((b) => b.id)).toEqual(['gemini/gemini-3.5-flash-lite', 'custom/llama3']);
     expect(brains[1]?.maxInputTokens).toBe(8000);
   });
 
