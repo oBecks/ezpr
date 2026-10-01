@@ -41,7 +41,7 @@ async function gatherImports(chunk: FileEntry[], opts: GatherOptions): Promise<I
   const withContent = chunk.filter((f) => f.content !== undefined);
   const lists = await Promise.all(
     withContent.map((f) =>
-      resolveImports(f.path, f.content ?? '', opts.read, {
+      resolveImports({ path: f.path, content: f.content ?? '' }, opts.read, {
         exclude: opts.changed,
         ignored: opts.ignored,
       }),
