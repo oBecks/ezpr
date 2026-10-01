@@ -124,7 +124,8 @@ function blockedByExisting(
   workflow: string,
   force: boolean,
 ): boolean {
-  if (existing === null || existing === workflow || force) return false;
+  if (force || existing === null) return false;
+  if (existing === workflow) return false;
   io.log(`${WORKFLOW_PATH} already exists and differs from what EzPR would write:`);
   io.log('');
   io.log(simpleDiff(existing, workflow));
