@@ -41,7 +41,7 @@ permissions:
   contents: read
   pull-requests: write
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('ezpr-{0}', github.event.pull_request.number) || format('ezpr-cmd-{0}', github.event.issue.number || github.event.pull_request.number) }}
+  group: ${{ github.event_name == 'pull_request' && format('ezpr-{0}', github.event.pull_request.number) || format('ezpr-cmd-{0}', github.event.comment.id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   review:

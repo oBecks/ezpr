@@ -91110,6 +91110,13 @@ async function postInlineFindings(gh, allFiles, findings, minSeverity) {
 }
 
 // src/review/pipeline.ts
+async function withFreshDismissed(job) {
+  const { octokit, repo, pr } = job.gh;
+  if (!job.previous) return void 0;
+  const latest = await getSticky(octokit, repo, pr.number);
+  const fresh = latest?.body ? parseSticky(latest.body).dismissed : [];
+  return { ...job.previous, dismissed: [.../* @__PURE__ */ new Set([...job.previous.dismissed, ...fresh])] };
+}
 function cached2(read2) {
   const cache = /* @__PURE__ */ new Map();
   return (path) => {
@@ -91213,7 +91220,12 @@ async function publishReview(job, done, noCheckout) {
     configProblems: job.settings.problems
   });
   if (!job.gh.canComment) return job.publish(content);
-  const body = composeSticky(job.previous, content, pr.headSha, (/* @__PURE__ */ new Date()).toISOString());
+  const body = composeSticky(
+    await withFreshDismissed(job),
+    content,
+    pr.headSha,
+    (/* @__PURE__ */ new Date()).toISOString()
+  );
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
 async function publishNothing(job, prep) {
@@ -91228,7 +91240,12 @@ async function publishNothing(job, prep) {
 async function publishStandalone(job, content) {
   if (!job.gh.canComment) return job.publish(content);
   const { octokit, repo, pr } = job.gh;
-  const body = composeSticky(job.previous, content, pr.headSha, (/* @__PURE__ */ new Date()).toISOString());
+  const body = composeSticky(
+    await withFreshDismissed(job),
+    content,
+    pr.headSha,
+    (/* @__PURE__ */ new Date()).toISOString()
+  );
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
 async function reviewPr(job) {

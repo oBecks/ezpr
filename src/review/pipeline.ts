@@ -7,9 +7,9 @@ import { checkoutReader, checkoutRoot, gatherExtras } from '../context/repo';
 import { loadRules } from '../context/rules';
 import { MAX_CHUNKS, STRICTNESS_THRESHOLD } from '../config';
 import type { Settings } from '../context/settings';
-import { writeSticky, type getSticky } from '../github/comments';
+import { getSticky, writeSticky } from '../github/comments';
 import { fileReader, readerAt } from '../github/pr';
-import { composeSticky, type StickyState } from '../github/sticky';
+import { composeSticky, parseSticky, type StickyState } from '../github/sticky';
 import { buildSystemPrompt } from '../prompt/builder';
 import type { Finding } from '../prompt/schema';
 import type { ChainFailure } from '../providers/chain';
@@ -46,6 +46,18 @@ interface Setup {
   prep: Prepared;
   read: Read;
   hasRules: boolean;
+}
+
+/**
+ * Commands run alongside Reviews, so an `@ezpr ignore` may land while a Review is running. The
+ * Summary is written from `previous`, so dismissals made since it was read are merged back in.
+ */
+async function withFreshDismissed(job: ReviewJob): Promise<StickyState | undefined> {
+  const { octokit, repo, pr } = job.gh;
+  if (!job.previous) return undefined;
+  const latest = await getSticky(octokit, repo, pr.number);
+  const fresh = latest?.body ? parseSticky(latest.body).dismissed : [];
+  return { ...job.previous, dismissed: [...new Set([...job.previous.dismissed, ...fresh])] };
 }
 
 /** Reads each repo file at most once per run. */
@@ -175,7 +187,12 @@ async function publishReview(
     configProblems: job.settings.problems,
   });
   if (!job.gh.canComment) return job.publish(content);
-  const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
+  const body = composeSticky(
+    await withFreshDismissed(job),
+    content,
+    pr.headSha,
+    new Date().toISOString(),
+  );
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
 
@@ -197,7 +214,12 @@ async function publishNothing(job: ReviewJob, prep: Prepared): Promise<void> {
 async function publishStandalone(job: ReviewJob, content: string): Promise<void> {
   if (!job.gh.canComment) return job.publish(content);
   const { octokit, repo, pr } = job.gh;
-  const body = composeSticky(job.previous, content, pr.headSha, new Date().toISOString());
+  const body = composeSticky(
+    await withFreshDismissed(job),
+    content,
+    pr.headSha,
+    new Date().toISOString(),
+  );
   await writeSticky(octokit, repo, pr.number, job.existing, body);
 }
 

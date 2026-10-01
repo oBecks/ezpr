@@ -48,7 +48,7 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 
 ## Phase 6: Commands, CLI, release
 
-- Commands in the same workflow file: `pull_request`, `issue_comment` and `pull_request_review_comment`; the Action branches on the event. One shared gate (owner/member/collaborator only, others silently ignored) and one parser (line-start, first command only, quotes and code fences ignored). Works on fork PRs (ADR-0010). Own concurrency group `ezpr-cmd-<pr>`, no cancel. 👀 reaction on accept; usage reply on an unknown command (maintainers only).
+- Commands in the same workflow file: `pull_request`, `issue_comment` and `pull_request_review_comment`; the Action branches on the event. One shared gate (owner/member/collaborator only, others silently ignored) and one parser (line-start, first command only, quotes and code fences ignored). Works on fork PRs (ADR-0010). One concurrency group per comment (`ezpr-cmd-<comment id>`), so quick commands are never dropped; a Review merges in dismissals made while it ran. 👀 reaction on accept; usage reply on an unknown command (maintainers only).
 - `@ezpr review`: Forced Review of the whole PR (ignores the Reviewed SHA; Already commented lines still skipped).
 - `@ezpr explain`: Walkthrough on the PR conversation; in an inline thread, explains that Finding. No free-form questions in v1.
 - `@ezpr ignore` (inline-thread reply): Dismissed finding keyed by file path plus message hash, stored in the Summary marker (max 50, oldest dropped). Replies "Dismissed", leaves the thread open. Path globs stay in `.ezpr.yml`.
