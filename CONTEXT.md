@@ -23,10 +23,10 @@ The ordered list of Brains tried in turn until one succeeds. Built from whicheve
 The comment EzPR posts when no Brain has credentials, explaining how to add a free key.
 
 **Context**:
-Everything sent to a Brain besides instructions: the diff, full changed files, and (later) imported files, callers, and project rules.
+Everything sent to a Brain besides instructions: the diff, full changed files, Imported files, Caller snippets, and Project rules. Trimmed to a Brain's budget in that priority order, lowest first.
 
 **Project rules**:
-The repo's own `REVIEW.md`, always included in Context when present.
+The repo's own `REVIEW.md`, read from the base branch (so a pull request cannot rewrite its own reviewer's rules) and always included when present. Guidance from the repo owner, not pull request data.
 
 **Fork PR**:
 A pull request from a fork, where EzPR cannot post comments and writes the Review to the job summary instead.
@@ -45,3 +45,15 @@ The head commit a Review covered, recorded in the Summary's marker. The next Rev
 
 **Review history**:
 The Summary shows the latest Review on top; earlier Reviews are kept in a collapsed section, each labelled with its Reviewed SHA and time.
+
+**Imported file**:
+A repo-local file that a changed file imports (one hop only), sent whole as background. Not itself under review.
+
+**Caller snippet**:
+A few lines around a place outside the changed files that uses a symbol the pull request changed. Not itself under review.
+
+**Ignore list**:
+Path globs, set by the Action's `ignore` input, that are never sent to a Brain.
+
+**Chunk**:
+A group of changed files reviewed in one Brain call when the diffs alone do not fit one Brain's budget. A Review has at most three; each walks the Fallback chain on its own, and their Findings are merged.

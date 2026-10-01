@@ -30,10 +30,14 @@ Phases are a plan and may change. Lasting decisions live in `docs/adr/`.
 
 ## Phase 4: Better context
 
-- Follow imports: TS/JS, Python, C/C++ `#include`; grep fallback for other languages.
-- Find usages of changed symbols and include caller snippets.
-- Always include `REVIEW.md`; ignore list; chunk large PRs.
-- Tests for context gathering.
+- Optional repo checkout (ADR-0007): the working tree powers import following and caller search; without it, API-only imports and a Summary note.
+- Follow imports: regex per language (TS/JS, Python, C/C++ `#include`), one hop, repo-local files, whole file; grep fallback for other languages.
+- Callers: changed symbol names from the diff, grepped in the checkout; +-5 lines per hit, at most 5 per symbol and about 20 snippets per Review; skip short or common names. Only symbols in the files being reviewed (so incremental runs search only new changes).
+- Project rules: `REVIEW.md` from the base branch in the system prompt, capped at about 4k tokens (ADR-0006).
+- `ignore` action input (newline-separated globs); Phase 5 merges it with `.ezpr.yml`.
+- Budget order: rules, diffs, file contents, callers, imports; lowest tier dropped first and named in the omitted note. Imports and callers go in labelled background-only blocks.
+- Chunk large PRs: only when diffs alone exceed a Brain's budget; at most 3 calls, each walking the chain; merge and dedupe Findings, place against the full-PR diff; footer lists every Brain used.
+- Tests: pure functions plus temp-dir fixtures, no network.
 
 ## Phase 5: Config and errors
 
